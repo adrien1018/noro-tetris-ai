@@ -1,4 +1,4 @@
-import multiprocessing, sys, hashlib
+import multiprocessing, sys, hashlib, traceback, os, subprocess
 import multiprocessing.connection
 from typing import Dict, List
 
@@ -16,6 +16,7 @@ device = torch.device('cuda')
 kInChannel = 1 + 1 + 7 + 7 + 14
 kH, kW = 20, 10
 kTensorDim = (3, kH, kW)
+kMaxFail = 60
 
 class Game:
     def __init__(self, seed: int):
@@ -23,7 +24,7 @@ class Game:
         self.env = tetris.Tetris(*self.args)
         self.env.Seed(seed)
         # board, current(7), next(7), speed(14)
-        self.obs = np.zeros(kTensorDim)
+        self.obs = np.zeros(kTensorDim, dtype = np.uint8)
         # keep track of the episode rewards
         self.rewards = []
         self.cnt = 0
@@ -41,14 +42,14 @@ class Game:
         Executes `action` (x, y)
          returns a tuple of (observation, reward, done, info).
         """
-        if self.env.over or self.cnt >= 40: return self.obs, 0, True, None
+        if self.env.over or self.cnt >= kMaxFail: return self.obs, 0, True, None
         suc, score, _ = self.env.Place(*action)
-        reward = score + 0.01 if suc else 0
+        reward = score + 0.01 if suc else -0.001
         self.cnt = 0 if suc else self.cnt + 1
         self.set_obs()
         # maintain rewards for each step
         self.rewards.append(reward)
-        over = self.env.over or self.cnt >= 40
+        over = self.env.over or self.cnt >= kMaxFail
 
         if over:
             # if finished, set episode information if episode is over, and reset
@@ -67,6 +68,10 @@ class Game:
         self.rewards = []
         self.cnt = 0
         return self.obs
+
+def OutputSMI(msg):
+    x = subprocess.run("nvidia-smi | grep python3", shell = True, capture_output = True)
+    print(msg, os.getpid(), '\n' + x.stdout.decode(), flush = True)
 
 def worker_process(remote: multiprocessing.connection.Connection, seed: int):
     """
@@ -93,7 +98,7 @@ class Worker:
     """
     def __init__(self, seed):
         self.child, parent = multiprocessing.Pipe()
-        self.process = multiprocessing.Process(target=worker_process, args=(parent, seed))
+        self.process = multiprocessing.Process(target = worker_process, args = (parent, seed))
         self.process.start()
 
 class ConvBlock(nn.Module):
@@ -118,7 +123,6 @@ class Model(nn.Module):
                 nn.BatchNorm2d(ch),
                 nn.ReLU(True),
                 )
-        self.linear = nn.Linear(kH * kW, kH * kW)
         self.res = nn.Sequential(*[ConvBlock(ch) for i in range(blk)])
         # A fully connected layer to get logits for $\pi$
         self.pi_logits_head = nn.Sequential(
@@ -147,13 +151,14 @@ class Model(nn.Module):
         q.scatter_(1, (16 + obs[:,2,0,2].type(torch.long)).view(-1, 1, 1, 1).repeat(1, 1, kH, kW), 1)
         x = self.start(q)
         x = self.res(x)
-        pi = self.pi_logits_head(x) + self.linear(q[:,1:2].reshape(-1, kH * kW))
+        pi = self.pi_logits_head(x)
+        pi[obs[:,1].view(-1, kH * kW) == 0] = -30
         value = self.value(x).reshape(-1)
         pi_sample = Categorical(logits = torch.clamp(pi, -30, 30))
         return pi_sample, value
 
 def obs_to_torch(obs: np.ndarray) -> torch.Tensor:
-    return torch.tensor(obs, dtype = torch.int32, device = device)
+    return torch.tensor(obs, dtype = torch.uint8, device = device)
 
 class Configs(BaseConfigs):
     # $\gamma$ and $\lambda$ for advantage calculation
@@ -167,8 +172,8 @@ class Configs(BaseConfigs):
     n_workers: int = 4
     # number of steps to run on each process for a single update
     worker_steps: int = 128
-    # number of mini batches
-    n_mini_batch: int = 16
+    # size of mini batches
+    mini_batch_size: int = 64
     channels: int = 128
     blocks: int = 8
     start_lr: float = 3e-5
@@ -178,13 +183,10 @@ class Configs(BaseConfigs):
 class Main:
     def __init__(self, c: Configs):
         # #### Configurations
-
         self.c = c
         # total number of samples for a single update
         self.batch_size = self.c.n_workers * self.c.worker_steps
-        # size of a mini batch
-        self.mini_batch_size = self.c.batch_size // self.c.n_mini_batch
-        assert (self.batch_size % self.c.n_mini_batch == 0)
+        assert (self.batch_size % self.c.mini_batch_size == 0)
 
         # #### Initialize
 
@@ -197,6 +199,7 @@ class Main:
             worker.child.send(("reset", None))
         for i, worker in enumerate(self.workers):
             self.obs[i] = worker.child.recv()
+        self.obs = obs_to_torch(self.obs)
 
         # model for sampling
         self.model = Model(c.channels, c.blocks).to(device)
@@ -208,11 +211,11 @@ class Main:
         """### Sample data with current policy"""
 
         rewards = np.zeros((self.c.n_workers, self.c.worker_steps), dtype = np.float32)
-        actions = np.zeros((self.c.n_workers, self.c.worker_steps), dtype = np.int32)
         done = np.zeros((self.c.n_workers, self.c.worker_steps), dtype = np.bool)
-        obs = np.zeros((self.c.n_workers, self.c.worker_steps, *kTensorDim), dtype = np.uint8)
-        log_pis = np.zeros((self.c.n_workers, self.c.worker_steps), dtype = np.float32)
-        values = np.zeros((self.c.n_workers, self.c.worker_steps), dtype = np.float32)
+        actions = torch.zeros((self.c.n_workers, self.c.worker_steps), dtype = torch.int32, device = device)
+        obs = torch.zeros((self.c.n_workers, self.c.worker_steps, *kTensorDim), dtype = torch.uint8, device = device)
+        log_pis = torch.zeros((self.c.n_workers, self.c.worker_steps), dtype = torch.float32, device = device)
+        values = torch.zeros((self.c.n_workers, self.c.worker_steps), dtype = torch.float32, device = device)
 
         # sample `worker_steps` from each worker
         for t in range(self.c.worker_steps):
@@ -222,16 +225,17 @@ class Main:
                 obs[:, t] = self.obs
                 # sample actions from $\pi_{\theta_{OLD}}$ for each worker;
                 #  this returns arrays of size `n_workers`
-                pi, v = self.model(obs_to_torch(self.obs))
-                values[:, t] = v.cpu().numpy()
+                pi, v = self.model(self.obs)
+                values[:, t] = v
                 a = pi.sample()
-                actions[:, t] = a.cpu().numpy()
-                log_pis[:, t] = pi.log_prob(a).cpu().numpy()
+                actions[:, t] = a
+                log_pis[:, t] = pi.log_prob(a)
 
             # run sampled actions on each worker
             for w, worker in enumerate(self.workers):
-                worker.child.send(("step", actions[w, t]))
+                worker.child.send(("step", actions[w, t].item()))
 
+            self.obs = np.zeros((self.c.n_workers, *kTensorDim))
             for w, worker in enumerate(self.workers):
                 # get results after executing the actions
                 self.obs[w], rewards[w, t], done[w, t], info = worker.child.recv()
@@ -244,6 +248,7 @@ class Main:
                     tracker.add('reward', info['reward'])
                     tracker.add('length', info['length'])
                     tracker.add('ratio', info['reward'] / info['length'] * 100)
+            self.obs = obs_to_torch(self.obs)
 
         # calculate advantages
         advantages = self._calc_advantages(done, rewards, values)
@@ -254,20 +259,13 @@ class Main:
             'log_pis': log_pis,
             'advantages': advantages
         }
-
         # samples are currently in [workers, time] table,
         #  we should flatten it
-        samples_flat = {}
-        for k, v in samples.items():
-            v = v.reshape(v.shape[0] * v.shape[1], *v.shape[2:])
-            if k == 'obs':
-                samples_flat[k] = obs_to_torch(v)
-            else:
-                samples_flat[k] = torch.tensor(v, device=device)
+        for i in samples:
+            samples[i] = samples[i].view(-1, *samples[i].shape[2:])
+        return samples
 
-        return samples_flat
-
-    def _calc_advantages(self, done: np.ndarray, rewards: np.ndarray, values: np.ndarray) -> np.ndarray:
+    def _calc_advantages(self, done: np.ndarray, rewards: np.ndarray, values: torch.Tensor) -> torch.Tensor:
         """
         ### Calculate advantages
         \begin{align}
@@ -295,30 +293,32 @@ class Main:
         &= \delta_t + \gamma \lambda \hat{A_{t+1}}
         \end{align}
         """
+        with torch.no_grad():
+            rewards = torch.from_numpy(rewards).to(device)
+            done = torch.from_numpy(done).to(device)
 
-        # advantages table
-        advantages = np.zeros((self.c.n_workers, self.c.worker_steps), dtype = np.float32)
-        last_advantage = 0
+            # advantages table
+            advantages = torch.zeros((self.c.n_workers, self.c.worker_steps), dtype = torch.float32, device = device)
+            last_advantage = 0
 
-        # $V(s_{t+1})$
-        _, last_value = self.model(obs_to_torch(self.obs))
-        last_value = last_value.cpu().data.numpy()
+            # $V(s_{t+1})$
+            _, last_value = self.model(self.obs)
 
-        for t in reversed(range(self.c.worker_steps)):
-            # mask if episode completed after step $t$
-            mask = 1.0 - done[:, t]
-            last_value = last_value * mask
-            last_advantage = last_advantage * mask
-            # $\delta_t$
-            delta = rewards[:, t] + self.c.gamma * last_value - values[:, t]
+            for t in reversed(range(self.c.worker_steps)):
+                # mask if episode completed after step $t$
+                mask = ~done[:, t]
+                last_value = last_value * mask
+                last_advantage = last_advantage * mask
+                # $\delta_t$
+                delta = rewards[:, t] + self.c.gamma * last_value - values[:, t]
 
-            # $\hat{A_t} = \delta_t + \gamma \lambda \hat{A_{t+1}}$
-            last_advantage = delta + self.c.gamma * self.c.lamda * last_advantage
+                # $\hat{A_t} = \delta_t + \gamma \lambda \hat{A_{t+1}}$
+                last_advantage = delta + self.c.gamma * self.c.lamda * last_advantage
 
-            # note that we are collecting in reverse order.
-            advantages[:, t] = last_advantage
+                # note that we are collecting in reverse order.
+                advantages[:, t] = last_advantage
 
-            last_value = values[:, t]
+                last_value = values[:, t]
 
         return advantages
 
@@ -337,18 +337,17 @@ class Main:
             indexes = torch.randperm(self.batch_size)
 
             # for each mini batch
-            for start in range(0, self.batch_size, self.mini_batch_size):
+            for start in range(0, self.batch_size, self.c.mini_batch_size):
                 # get mini batch
-                end = start + self.mini_batch_size
-                mini_batch_indexes = indexes[start: end]
+                end = start + self.c.mini_batch_size
+                mini_batch_indexes = indexes[start:end]
                 mini_batch = {}
                 for k, v in samples.items():
                     mini_batch[k] = v[mini_batch_indexes]
 
                 # train
-                loss = self._calc_loss(clip_range=clip_range,
-                                       samples=mini_batch)
-
+                loss = self._calc_loss(clip_range = clip_range,
+                                       samples = mini_batch)
                 # compute gradients
                 for pg in self.optimizer.param_groups:
                     pg['lr'] = learning_rate
@@ -357,20 +356,20 @@ class Main:
                 for x in self.model.parameters():
                     x.grad[torch.isnan(x.grad)] = 0
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm = 0.5)
-                torch.nn.utils.clip_grad_value_(self.model.parameters(), 2)
+                torch.nn.utils.clip_grad_value_(self.model.parameters(), 4)
                 for x in self.model.parameters():
                     x.grad[torch.isnan(x.grad)] = 0
-                for x in self.model.parameters():
-                    if torch.isnan(x).any(): print('a')
+                #for x in self.model.parameters():
+                #    if torch.isnan(x).any(): print('a')
                 self.optimizer.step()
-                for x in self.model.parameters():
-                    if torch.isnan(x).any(): print('b')
+                #for x in self.model.parameters():
+                #    if torch.isnan(x).any(): print('b')
 
 
     @staticmethod
     def _normalize(adv: torch.Tensor):
         """#### Normalize advantage function"""
-        return (adv - adv.mean()) / (adv.std() + 1e-4)
+        return (adv - adv.mean()) / (adv.std() + 1e-5)
 
     def _calc_loss(self, samples: Dict[str, torch.Tensor], clip_range: float) -> torch.Tensor:
         """
@@ -594,10 +593,10 @@ class Main:
 if __name__ == "__main__":
     conf = Configs()
     with experiment.record(
-            name = 'Tetris PPO 2',
+            name = 'Tetris PPO New (GPU)',
             exp_conf = conf):
         m = Main(conf)
         experiment.add_pytorch_models({'model': m.model})
         try: m.run_training_loop()
-        except Exception as e: print(e)
+        except Exception as e: print(traceback.format_exc())
         m.destroy()
