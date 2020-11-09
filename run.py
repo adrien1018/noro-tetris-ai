@@ -577,8 +577,8 @@ class Main:
             tracker.save()
             if (update + 1) % 50 == 0:
                 logger.log()
-            if (update + 1) % 200 == 0:
-                configs = {i: self.config.__getattribute__(i) for i in self.config.__annotations__}
+            if (update + 1) % 500 == 0:
+                configs = {i: self.c.__getattribute__(i) for i in self.c.__annotations__}
                 torch.save((self.model, configs), '/tmp2/b06902021/tetris/%s_%06d.pkl' %
                         (experiment.get_uuid()[:8], update + 1))
 
@@ -593,7 +593,7 @@ class Main:
 if __name__ == "__main__":
     conf = Configs()
     with experiment.record(
-            name = 'Tetris PPO New (GPU)',
+            name = 'Tetris_PPO_Valid_Only',
             exp_conf = conf):
         m = Main(conf)
         experiment.add_pytorch_models({'model': m.model})
