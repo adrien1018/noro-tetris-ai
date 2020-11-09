@@ -42,7 +42,6 @@ class Game:
         Executes `action` (x, y)
          returns a tuple of (observation, reward, done, info).
         """
-        if self.env.over or self.cnt >= kMaxFail: return self.obs, 0, True, None
         suc, score, _ = self.env.Place(*action)
         reward = score + 0.01 if suc else -0.001
         self.cnt = 0 if suc else self.cnt + 1
@@ -177,6 +176,7 @@ class Configs(BaseConfigs):
     channels: int = 128
     blocks: int = 8
     start_lr: float = 3e-5
+    start_clipping_range: float = 0.1
     vf_weight: float = 0.5
     entropy_weight: float = 1e-2
 
@@ -568,7 +568,7 @@ class Main:
             progress = update / self.c.updates
             # decreasing `learning_rate` and `clip_range` $\epsilon$
             learning_rate = self.c.start_lr * (1 - progress)
-            clip_range = 0.1 * (1 - progress)
+            clip_range = self.c.start_clipping_range * (1 - progress)
             # sample with current policy
             samples = self.sample()
             # train the model
