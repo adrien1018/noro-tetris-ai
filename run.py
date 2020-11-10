@@ -1,15 +1,20 @@
-import multiprocessing, sys, hashlib, traceback, os, subprocess
+#!/usr/bin/env python3
+
+import multiprocessing, sys, hashlib, traceback, os, subprocess, collections
 import multiprocessing.connection
 from typing import Dict, List
 
-import tetris
 import numpy as np, torch
-from labml import monit, tracker, logger, experiment
-from labml.configs import BaseConfigs
 from torch import nn
 from torch import optim
 from torch.distributions import Categorical
 from torch.nn import functional as F
+
+from labml import monit, tracker, logger, experiment
+from labml.configs import BaseConfigs
+from sortedcontainers import SortedList
+
+import tetris
 
 device = torch.device('cuda')
 # board, valid, current(7), next(7), speed(14)
@@ -180,6 +185,20 @@ class Configs(BaseConfigs):
     vf_weight: float = 0.5
     entropy_weight: float = 1e-2
 
+class SortedQueue:
+    def __init__(self, sz):
+        self.size = sz
+        self.__list = SortedList()
+        self.__queue = collections.deque()
+    def add(self, val):
+        self.__list.add(val)
+        self.__queue.append(val)
+        if len(self.__queue) > self.size: self.__list.discard(self.__queue.popleft())
+    def __len__(self): return len(self.__queue)
+    def get_ratio(self, val):
+        ind = min(len(self.__queue) - 1, max(0, int(len(self.__queue) * val)))
+        return self.__list[ind]
+
 class Main:
     def __init__(self, c: Configs):
         # #### Configurations
@@ -192,6 +211,8 @@ class Main:
 
         # create workers
         self.workers = [Worker(47 + i) for i in range(self.c.n_workers)]
+
+        self.reward_queue = SortedQueue(400)
 
         # initialize tensors for observations
         self.obs = np.zeros((self.c.n_workers, *kTensorDim))
@@ -245,9 +266,14 @@ class Main:
                 #  look at `Game` to see how it works.
                 # We also add a game frame to it for monitoring.
                 if info:
+                    self.reward_queue.add(info['reward'])
                     tracker.add('reward', info['reward'])
+                    tracker.add('reward_per01', self.reward_queue.get_ratio(0.01))
+                    tracker.add('reward_per10', self.reward_queue.get_ratio(0.1))
+                    tracker.add('reward_per50', self.reward_queue.get_ratio(0.5))
+                    tracker.add('reward_per90', self.reward_queue.get_ratio(0.9))
+                    tracker.add('reward_per99', self.reward_queue.get_ratio(0.99))
                     tracker.add('length', info['length'])
-                    tracker.add('ratio', info['reward'] / info['length'] * 100)
             self.obs = obs_to_torch(self.obs)
 
         # calculate advantages
