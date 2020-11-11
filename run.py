@@ -294,30 +294,6 @@ class Main:
     def _calc_advantages(self, done: np.ndarray, rewards: np.ndarray, values: torch.Tensor) -> torch.Tensor:
         """
         ### Calculate advantages
-        \begin{align}
-        \hat{A_t^{(1)}} &= r_t + \gamma V(s_{t+1}) - V(s)
-        \\
-        \hat{A_t^{(2)}} &= r_t + \gamma r_{t+1} +\gamma^2 V(s_{t+2}) - V(s)
-        \\
-        ...
-        \\
-        \hat{A_t^{(\infty)}} &= r_t + \gamma r_{t+1} +\gamma^2 r_{t+1} + ... - V(s)
-        \end{align}
-        $\hat{A_t^{(1)}}$ is high bias, low variance whilst
-        $\hat{A_t^{(\infty)}}$ is unbiased, high variance.
-        We take a weighted average of $\hat{A_t^{(k)}}$ to balance bias and variance.
-        This is called Generalized Advantage Estimation.
-        $$\hat{A_t} = \hat{A_t^{GAE}} = \sum_k w_k \hat{A_t^{(k)}}$$
-        We set $w_k = \lambda^{k-1}$, this gives clean calculation for
-        $\hat{A_t}$
-        \begin{align}
-        \delta_t &= r_t + \gamma V(s_{t+1}) - V(s_t)$
-        \\
-        \hat{A_t} &= \delta_t + \gamma \lambda \delta_{t+1} + ... +
-                             (\gamma \lambda)^{T - t + 1} \delta_{T - 1}$
-        \\
-        &= \delta_t + \gamma \lambda \hat{A_{t+1}}
-        \end{align}
         """
         with torch.no_grad():
             rewards = torch.from_numpy(rewards).to(device)
@@ -400,90 +376,6 @@ class Main:
     def _calc_loss(self, samples: Dict[str, torch.Tensor], clip_range: float) -> torch.Tensor:
         """
         ## PPO Loss
-        We want to maximize policy reward
-         $$\max_\theta J(\pi_\theta) =
-           \mathop{\mathbb{E}}_{\tau \sim \pi_\theta}\Biggl[\sum_{t=0}^\infty \gamma^t r_t \Biggr]$$
-         where $r$ is the reward, $\pi$ is the policy, $\tau$ is a trajectory sampled from policy,
-         and $\gamma$ is the discount factor between $[0, 1]$.
-        \begin{align}
-        \mathbb{E}_{\tau \sim \pi_\theta} \Biggl[
-         \sum_{t=0}^\infty \gamma^t A^{\pi_{OLD}}(s_t, a_t)
-        \Biggr] &=
-        \\
-        \mathbb{E}_{\tau \sim \pi_\theta} \Biggl[
-          \sum_{t=0}^\infty \gamma^t \Bigl(
-           Q^{\pi_{OLD}}(s_t, a_t) - V^{\pi_{OLD}}(s_t)
-          \Bigr)
-         \Biggr] &=
-        \\
-        \mathbb{E}_{\tau \sim \pi_\theta} \Biggl[
-          \sum_{t=0}^\infty \gamma^t \Bigl(
-           r_t + V^{\pi_{OLD}}(s_{t+1}) - V^{\pi_{OLD}}(s_t)
-          \Bigr)
-         \Biggr] &=
-        \\
-        \mathbb{E}_{\tau \sim \pi_\theta} \Biggl[
-          \sum_{t=0}^\infty \gamma^t \Bigl(
-           r_t
-          \Bigr)
-         \Biggr]
-         - \mathbb{E}_{\tau \sim \pi_\theta}
-            \Biggl[V^{\pi_{OLD}}(s_0)\Biggr] &=
-        J(\pi_\theta) - J(\pi_{\theta_{OLD}})
-        \end{align}
-        So,
-         $$\max_\theta J(\pi_\theta) =
-           \max_\theta \mathbb{E}_{\tau \sim \pi_\theta} \Biggl[
-              \sum_{t=0}^\infty \gamma^t A^{\pi_{OLD}}(s_t, a_t)
-           \Biggr]$$
-        Define discounted-future state distribution,
-         $$d^\pi(s) = (1 - \gamma) \sum_{t=0}^\infty \gamma^t P(s_t = s | \pi)$$
-        Then,
-        \begin{align}
-        J(\pi_\theta) - J(\pi_{\theta_{OLD}})
-        &= \mathbb{E}_{\tau \sim \pi_\theta} \Biggl[
-         \sum_{t=0}^\infty \gamma^t A^{\pi_{OLD}}(s_t, a_t)
-        \Biggr]
-        \\
-        &= \frac{1}{1 - \gamma}
-         \mathbb{E}_{s \sim d^{\pi_\theta}, a \sim \pi_\theta} \Bigl[
-          A^{\pi_{OLD}}(s, a)
-         \Bigr]
-        \end{align}
-        Importance sampling $a$ from $\pi_{\theta_{OLD}}$,
-        \begin{align}
-        J(\pi_\theta) - J(\pi_{\theta_{OLD}})
-        &= \frac{1}{1 - \gamma}
-         \mathbb{E}_{s \sim d^{\pi_\theta}, a \sim \pi_\theta} \Bigl[
-          A^{\pi_{OLD}}(s, a)
-         \Bigr]
-        \\
-        &= \frac{1}{1 - \gamma}
-         \mathbb{E}_{s \sim d^{\pi_\theta}, a \sim \pi_{\theta_{OLD}}} \Biggl[
-          \frac{\pi_\theta(a|s)}{\pi_{\theta_{OLD}}(a|s)} A^{\pi_{OLD}}(s, a)
-         \Biggr]
-        \end{align}
-        Then we assume $d^\pi_\theta(s)$ and  $d^\pi_{\theta_{OLD}}(s)$ are similar.
-        The error we introduce to $J(\pi_\theta) - J(\pi_{\theta_{OLD}})$
-         by this assumtion is bound by the KL divergence between
-         $\pi_\theta$ and $\pi_{\theta_{OLD}}$.
-        [Constrained Policy Optimization](https://arxiv.org/abs/1705.10528)
-         shows the proof of this. I haven't read it.
-        \begin{align}
-        J(\pi_\theta) - J(\pi_{\theta_{OLD}})
-        &= \frac{1}{1 - \gamma}
-         \mathop{\mathbb{E}}_{s \sim d^{\pi_\theta} \atop a \sim \pi_{\theta_{OLD}}} \Biggl[
-          \frac{\pi_\theta(a|s)}{\pi_{\theta_{OLD}}(a|s)} A^{\pi_{OLD}}(s, a)
-         \Biggr]
-        \\
-        &\approx \frac{1}{1 - \gamma}
-         \mathop{\mathbb{E}}_{\color{orange}{s \sim d^{\pi_{\theta_{OLD}}}}
-         \atop a \sim \pi_{\theta_{OLD}}} \Biggl[
-          \frac{\pi_\theta(a|s)}{\pi_{\theta_{OLD}}(a|s)} A^{\pi_{OLD}}(s, a)
-         \Biggr]
-        \\
-        &= \frac{1}{1 - \gamma} \mathcal{L}^{CPI}
-        \end{align}
         """
 
         # $R_t$ returns sampled from $\pi_{\theta_{OLD}}$
@@ -508,17 +400,6 @@ class Main:
         # *this is different from rewards* $r_t$.
         ratio = torch.exp(log_pi - samples['log_pis'])
 
-        # \begin{align}
-        # \mathcal{L}^{CLIP}(\theta) =
-        #  \mathbb{E}_{a_t, s_t \sim \pi_{\theta{OLD}}} \biggl[
-        #    min \Bigl(r_t(\theta) \bar{A_t},
-        #              clip \bigl(
-        #               r_t(\theta), 1 - \epsilon, 1 + \epsilon
-        #              \bigr) \bar{A_t}
-        #    \Bigr)
-        #  \biggr]
-        # \end{align}
-        #
         # The ratio is clipped to be close to 1.
         # We take the minimum so that the gradient will only pull
         # $\pi_\theta$ towards $\pi_{\theta_{OLD}}$ if the ratio is
@@ -548,17 +429,6 @@ class Main:
 
         # #### Value
 
-        # \begin{align}
-        # V^{\pi_\theta}_{CLIP}(s_t)
-        #  &= clip\Bigl(V^{\pi_\theta}(s_t) - \hat{V_t}, -\epsilon, +\epsilon\Bigr)
-        # \\
-        # \mathcal{L}^{VF}(\theta)
-        #  &= \frac{1}{2} \mathbb{E} \biggl[
-        #   max\Bigl(\bigl(V^{\pi_\theta}(s_t) - R_t\bigr)^2,
-        #       \bigl(V^{\pi_\theta}_{CLIP}(s_t) - R_t\bigr)^2\Bigr)
-        #  \biggr]
-        # \end{align}
-        #
         # Clipping makes sure the value function $V_\theta$ doesn't deviate
         #  significantly from $V_{\theta_{OLD}}$.
         clipped_value = samples['values'] + (value - samples['values']).clamp(min = -clip_range,
