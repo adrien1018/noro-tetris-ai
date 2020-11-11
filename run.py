@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-import multiprocessing, sys, hashlib, traceback, os, subprocess, collections
+import multiprocessing, sys, hashlib, traceback, os, subprocess, collections, hashlib
 import multiprocessing.connection
 from typing import Dict, List
 
@@ -9,6 +9,7 @@ from torch import nn
 from torch import optim
 from torch.distributions import Categorical
 from torch.nn import functional as F
+from torch.cuda.amp import autocast, GradScaler
 
 from labml import monit, tracker, logger, experiment
 from labml.configs import BaseConfigs
@@ -17,11 +18,11 @@ from sortedcontainers import SortedList
 import tetris
 
 device = torch.device('cuda')
-# board, valid, current(7), next(7), speed(14)
-kInChannel = 1 + 1 + 7 + 7 + 14
+# board, valid, current(7), next(7)
+kInChannel = 1 + 1 + 7 + 7
 kH, kW = 20, 10
 kTensorDim = (3, kH, kW)
-kMaxFail = 60
+kMaxFail = 3
 
 class Game:
     def __init__(self, seed: int):
@@ -40,7 +41,6 @@ class Game:
         self.obs[1] = self.env.allowed[0]
         self.obs[2,0,0] = self.env.cur
         self.obs[2,0,1] = self.env.nxt
-        self.obs[2,0,2] = self.env.Speed()
 
     def step(self, action):
         """
@@ -48,7 +48,7 @@ class Game:
          returns a tuple of (observation, reward, done, info).
         """
         suc, score, _ = self.env.Place(*action)
-        reward = score + 0.01 if suc else -0.001
+        reward = score if suc else -0.1
         self.cnt = 0 if suc else self.cnt + 1
         self.set_obs()
         # maintain rewards for each step
@@ -64,9 +64,7 @@ class Game:
         return self.obs, reward, over, episode_info
 
     def reset(self):
-        """
-        Reset environment
-        """
+        """ Reset environment """
         self.env.Reset(*self.args)
         self.set_obs()
         self.rewards = []
@@ -77,19 +75,23 @@ def OutputSMI(msg):
     x = subprocess.run("nvidia-smi | grep python3", shell = True, capture_output = True)
     print(msg, os.getpid(), '\n' + x.stdout.decode(), flush = True)
 
-def worker_process(remote: multiprocessing.connection.Connection, seed: int):
-    """
-    Each worker process runs this method
-    """
+def worker_process(remote: multiprocessing.connection.Connection, seed: int, num: int):
+    """Each worker process runs this method"""
     # create game
-    game = Game(seed)
+    Seed = lambda x: int.from_bytes(hashlib.sha256(
+        int.to_bytes(seed, 4, 'little') + int.to_bytes(x, 4, 'little')).digest(), 'little')
+    games = [Game(Seed(i)) for i in range(num)]
     # wait for instructions from the connection and execute them
     while True:
+        result = []
         cmd, data = remote.recv()
         if cmd == "step":
-            remote.send(game.step((data // kW, data % kW)))
+            for i in range(num): result.append(games[i].step((data[i] // kW, data[i] % kW)))
+            obs, rew, over, info = zip(*result)
+            remote.send((np.stack(obs), np.stack(rew), np.array(over), list(info)))
         elif cmd == "reset":
-            remote.send(game.reset())
+            for i in range(num): result.append(games[i].reset())
+            remote.send(np.stack(result))
         elif cmd == "close":
             remote.close()
             break
@@ -97,12 +99,10 @@ def worker_process(remote: multiprocessing.connection.Connection, seed: int):
             raise NotImplementedError
 
 class Worker:
-    """
-    Creates a new worker and runs it in a separate process.
-    """
-    def __init__(self, seed):
+    """Creates a new worker and runs it in a separate process."""
+    def __init__(self, seed, num):
         self.child, parent = multiprocessing.Pipe()
-        self.process = multiprocessing.Process(target = worker_process, args = (parent, seed))
+        self.process = multiprocessing.Process(target = worker_process, args = (parent, seed, num))
         self.process.start()
 
 class ConvBlock(nn.Module):
@@ -147,16 +147,16 @@ class Model(nn.Module):
                 nn.Linear(256, 1)
                 )
 
+    @autocast()
     def forward(self, obs: torch.Tensor):
-        q = torch.zeros((obs.shape[0], kInChannel, kH, kW), dtype = torch.float32, device = device)
+        q = torch.zeros((obs.shape[0], kInChannel, kH, kW), dtype = torch.float16, device = device)
         q[:,0:2] = obs[:,0:2]
         q.scatter_(1, (2 + obs[:,2,0,0].type(torch.long)).view(-1, 1, 1, 1).repeat(1, 1, kH, kW), 1)
         q.scatter_(1, (9 + obs[:,2,0,1].type(torch.long)).view(-1, 1, 1, 1).repeat(1, 1, kH, kW), 1)
-        q.scatter_(1, (16 + obs[:,2,0,2].type(torch.long)).view(-1, 1, 1, 1).repeat(1, 1, kH, kW), 1)
         x = self.start(q)
         x = self.res(x)
         pi = self.pi_logits_head(x)
-        pi[obs[:,1].view(-1, kH * kW) == 0] = -30
+        pi -= (1 - obs[:,1].view(-1, kH * kW)) * 20
         value = self.value(x).reshape(-1)
         pi_sample = Categorical(logits = torch.clamp(pi, -30, 30))
         return pi_sample, value
@@ -165,23 +165,25 @@ def obs_to_torch(obs: np.ndarray) -> torch.Tensor:
     return torch.tensor(obs, dtype = torch.uint8, device = device)
 
 class Configs(BaseConfigs):
+    # #### Configurations
     # $\gamma$ and $\lambda$ for advantage calculation
-    gamma: float = 0.99
+    gamma: float = 0.996
     lamda: float = 0.95
     # number of updates
-    updates: int = 200000
+    updates: int = 80000
     # number of epochs to train the model with sampled data
-    epochs: int = 1
+    epochs: int = 2
     # number of worker processes
-    n_workers: int = 4
+    n_workers: int = 2
+    env_per_worker: int = 16
     # number of steps to run on each process for a single update
     worker_steps: int = 128
     # size of mini batches
-    mini_batch_size: int = 64
+    mini_batch_size: int = 512
     channels: int = 128
     blocks: int = 8
-    start_lr: float = 3e-5
-    start_clipping_range: float = 0.1
+    start_lr: float = 2e-4
+    start_clipping_range: float = 0.2
     vf_weight: float = 0.5
     entropy_weight: float = 1e-2
 
@@ -201,42 +203,43 @@ class SortedQueue:
 
 class Main:
     def __init__(self, c: Configs):
-        # #### Configurations
         self.c = c
         # total number of samples for a single update
-        self.batch_size = self.c.n_workers * self.c.worker_steps
+        self.envs = self.c.n_workers * self.c.env_per_worker
+        self.batch_size = self.envs * self.c.worker_steps
         assert (self.batch_size % self.c.mini_batch_size == 0)
 
         # #### Initialize
-
         # create workers
-        self.workers = [Worker(47 + i) for i in range(self.c.n_workers)]
-
+        self.workers = [Worker(47 + i, c.env_per_worker) for i in range(self.c.n_workers)]
         self.reward_queue = SortedQueue(400)
 
         # initialize tensors for observations
-        self.obs = np.zeros((self.c.n_workers, *kTensorDim))
+        self.obs = np.zeros((self.envs, *kTensorDim))
         for worker in self.workers:
             worker.child.send(("reset", None))
-        for i, worker in enumerate(self.workers):
-            self.obs[i] = worker.child.recv()
+        for w, worker in enumerate(self.workers):
+            self.obs[self.w_range(w)] = worker.child.recv()
         self.obs = obs_to_torch(self.obs)
 
         # model for sampling
         self.model = Model(c.channels, c.blocks).to(device)
 
         # optimizer
+        self.scaler = GradScaler()
         self.optimizer = optim.Adam(self.model.parameters(), lr = self.c.start_lr)
+
+    def w_range(self, x): return slice(x * self.c.env_per_worker, (x + 1) * self.c.env_per_worker)
 
     def sample(self) -> (Dict[str, np.ndarray], List):
         """### Sample data with current policy"""
 
-        rewards = np.zeros((self.c.n_workers, self.c.worker_steps), dtype = np.float32)
-        done = np.zeros((self.c.n_workers, self.c.worker_steps), dtype = np.bool)
-        actions = torch.zeros((self.c.n_workers, self.c.worker_steps), dtype = torch.int32, device = device)
-        obs = torch.zeros((self.c.n_workers, self.c.worker_steps, *kTensorDim), dtype = torch.uint8, device = device)
-        log_pis = torch.zeros((self.c.n_workers, self.c.worker_steps), dtype = torch.float32, device = device)
-        values = torch.zeros((self.c.n_workers, self.c.worker_steps), dtype = torch.float32, device = device)
+        rewards = np.zeros((self.envs, self.c.worker_steps), dtype = np.float16)
+        done = np.zeros((self.envs, self.c.worker_steps), dtype = np.bool)
+        actions = torch.zeros((self.envs, self.c.worker_steps), dtype = torch.int32, device = device)
+        obs = torch.zeros((self.envs, self.c.worker_steps, *kTensorDim), dtype = torch.uint8, device = device)
+        log_pis = torch.zeros((self.envs, self.c.worker_steps), dtype = torch.float16, device = device)
+        values = torch.zeros((self.envs, self.c.worker_steps), dtype = torch.float16, device = device)
 
         # sample `worker_steps` from each worker
         for t in range(self.c.worker_steps):
@@ -254,18 +257,20 @@ class Main:
 
             # run sampled actions on each worker
             for w, worker in enumerate(self.workers):
-                worker.child.send(("step", actions[w, t].item()))
+                worker.child.send(("step", actions[self.w_range(w),t].cpu().numpy()))
 
-            self.obs = np.zeros((self.c.n_workers, *kTensorDim))
+            self.obs = np.zeros((self.envs, *kTensorDim))
             for w, worker in enumerate(self.workers):
                 # get results after executing the actions
-                self.obs[w], rewards[w, t], done[w, t], info = worker.child.recv()
+                now = self.w_range(w)
+                self.obs[now], rewards[now,t], done[now,t], info_arr = worker.child.recv()
 
                 # collect episode info, which is available if an episode finished;
                 #  this includes total reward and length of the episode -
                 #  look at `Game` to see how it works.
                 # We also add a game frame to it for monitoring.
-                if info:
+                for info in info_arr:
+                    if not info: continue
                     self.reward_queue.add(info['reward'])
                     tracker.add('reward', info['reward'])
                     tracker.add('reward_per01', self.reward_queue.get_ratio(0.01))
@@ -292,16 +297,14 @@ class Main:
         return samples
 
     def _calc_advantages(self, done: np.ndarray, rewards: np.ndarray, values: torch.Tensor) -> torch.Tensor:
-        """
-        ### Calculate advantages
-        """
-        with torch.no_grad():
+        """### Calculate advantages"""
+        with torch.no_grad(), autocast():
             rewards = torch.from_numpy(rewards).to(device)
             done = torch.from_numpy(done).to(device)
 
             # advantages table
-            advantages = torch.zeros((self.c.n_workers, self.c.worker_steps), dtype = torch.float32, device = device)
-            last_advantage = 0
+            advantages = torch.zeros((self.envs, self.c.worker_steps), dtype = torch.float16, device = device)
+            last_advantage = torch.zeros(self.envs, dtype = torch.float16, device = device)
 
             # $V(s_{t+1})$
             _, last_value = self.model(self.obs)
@@ -313,21 +316,15 @@ class Main:
                 last_advantage = last_advantage * mask
                 # $\delta_t$
                 delta = rewards[:, t] + self.c.gamma * last_value - values[:, t]
-
                 # $\hat{A_t} = \delta_t + \gamma \lambda \hat{A_{t+1}}$
                 last_advantage = delta + self.c.gamma * self.c.lamda * last_advantage
-
                 # note that we are collecting in reverse order.
                 advantages[:, t] = last_advantage
-
                 last_value = values[:, t]
-
         return advantages
 
     def train(self, samples: Dict[str, torch.Tensor], learning_rate: float, clip_range: float):
-        """
-        ### Train the model based on samples
-        """
+        """### Train the model based on samples"""
 
         # It learns faster with a higher number of epochs,
         #  but becomes a little unstable; that is,
@@ -354,29 +351,20 @@ class Main:
                 for pg in self.optimizer.param_groups:
                     pg['lr'] = learning_rate
                 self.optimizer.zero_grad()
-                loss.backward()
-                for x in self.model.parameters():
-                    x.grad[torch.isnan(x.grad)] = 0
+                self.scaler.scale(loss).backward()
+                self.scaler.unscale_(self.optimizer)
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm = 0.5)
-                torch.nn.utils.clip_grad_value_(self.model.parameters(), 4)
-                for x in self.model.parameters():
-                    x.grad[torch.isnan(x.grad)] = 0
-                #for x in self.model.parameters():
-                #    if torch.isnan(x).any(): print('a')
-                self.optimizer.step()
-                #for x in self.model.parameters():
-                #    if torch.isnan(x).any(): print('b')
-
+                torch.nn.utils.clip_grad_value_(self.model.parameters(), 32)
+                self.scaler.step(self.optimizer)
+                self.scaler.update()
 
     @staticmethod
     def _normalize(adv: torch.Tensor):
         """#### Normalize advantage function"""
-        return (adv - adv.mean()) / (adv.std() + 1e-5)
+        return (adv - adv.mean()) / (adv.std() + 1e-4)
 
     def _calc_loss(self, samples: Dict[str, torch.Tensor], clip_range: float) -> torch.Tensor:
-        """
-        ## PPO Loss
-        """
+        """## PPO Loss"""
 
         # $R_t$ returns sampled from $\pi_{\theta_{OLD}}$
         sampled_return = samples['values'] + samples['advantages']
@@ -457,9 +445,7 @@ class Main:
         return loss
 
     def run_training_loop(self):
-        """
-        ### Run training loop
-        """
+        """### Run training loop"""
         for update in monit.loop(self.c.updates):
             progress = update / self.c.updates
             # decreasing `learning_rate` and `clip_range` $\epsilon$
@@ -479,17 +465,13 @@ class Main:
                         (experiment.get_uuid()[:8], update + 1))
 
     def destroy(self):
-        """
-        ### Destroy
-        Stop the workers
-        """
         for worker in self.workers:
             worker.child.send(("close", None))
 
 if __name__ == "__main__":
     conf = Configs()
     with experiment.record(
-            name = 'Tetris_PPO_Valid_Only',
+            name = 'Tetris_PPO_float16',
             exp_conf = conf):
         m = Main(conf)
         experiment.add_pytorch_models({'model': m.model})
