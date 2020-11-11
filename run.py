@@ -31,6 +31,7 @@ class Game:
         self.env.Seed(seed)
         # board, current(7), next(7), speed(14)
         self.obs = np.zeros(kTensorDim, dtype = np.uint8)
+        self.set_obs()
         # keep track of the episode rewards
         self.rewards = []
         self.cnt = 0
