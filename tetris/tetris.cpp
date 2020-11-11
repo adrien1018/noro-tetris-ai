@@ -3,8 +3,7 @@
 #include <array>
 #include <vector>
 #include <utility>
-//#include <python3.8/Python.h>
-#include <Python.h>
+#include <python3.8/Python.h>
 
 const int kN = 20, kM = 10;
 using Entry = int32_t;
@@ -190,9 +189,13 @@ static PyObject* Allowed(PyObject *self, PyObject *args) {
   if (buf.len < (long)(kM * kN * sizeof(Entry)) ||
       ret_buf.len < (long)(kM * kN * sizeof(Entry) * (rotate ? kBlocks[kind].size() : 1))) {
     PyErr_SetString(PyExc_ValueError, "incorrect buffer length");
+    PyBuffer_Release(&buf);
+    PyBuffer_Release(&ret_buf);
     return nullptr;
   }
   internal::Allowed(buf.buf, kind, rotate, limit, ret_buf.buf, ret_buf.len);
+  PyBuffer_Release(&buf);
+  PyBuffer_Release(&ret_buf);
   Py_RETURN_NONE;
 }
 
@@ -206,8 +209,11 @@ static PyObject* Place(PyObject *self, PyObject *args) {
   }
   internal::Place(buf.buf, kind, g, x, y, fill);
   if (remove) {
-    return PyLong_FromLong(internal::Remove(buf.buf));
+    int x = internal::Remove(buf.buf);
+    PyBuffer_Release(&buf);
+    return PyLong_FromLong(x);
   } else {
+    PyBuffer_Release(&buf);
     Py_RETURN_NONE;
   }
 }
@@ -216,7 +222,9 @@ static PyObject* Remove(PyObject *self, PyObject *args) {
   Py_buffer buf;
   // input(int, 20*10)
   if (!PyArg_ParseTuple(args, "w*", &buf)) return nullptr;
-  return PyLong_FromLong(internal::Remove(buf.buf));
+  int x = internal::Remove(buf.buf);
+  PyBuffer_Release(&buf);
+  return PyLong_FromLong(x);
 }
 
 static PyMethodDef methods[] = {
