@@ -304,7 +304,9 @@ class Main:
 
     def run_training_loop(self):
         """### Run training loop"""
-        for update in monit.loop(self.c.updates):
+        offset = tracker.get_global_step()
+        for _ in monit.loop(self.c.updates - offset):
+            update = tracker.get_global_step()
             progress = update / self.c.updates
             # decreasing `learning_rate` and `clip_range` $\epsilon$
             learning_rate = self.c.start_lr * (1 - progress)
@@ -315,12 +317,9 @@ class Main:
             self.train(samples, learning_rate, clip_range)
             # write summary info to the writer, and log to the screen
             tracker.save()
-            if (update + 1) % 50 == 0:
-                logger.log()
+            logger.log()
             if (update + 1) % 500 == 0:
-                configs = {i: self.c.__getattribute__(i) for i in self.c.__annotations__}
-                torch.save((self.model, configs), '/tmp2/b06902021/tetris/%s_%06d.pkl' %
-                        (experiment.get_uuid()[:8], update + 1))
+                experiment.save_checkpoint()
 
     def destroy(self):
         for worker in self.workers:
@@ -328,11 +327,12 @@ class Main:
 
 if __name__ == "__main__":
     conf = Configs()
-    with experiment.record(
-            name = 'Tetris_PPO_float16',
-            exp_conf = conf):
-        m = Main(conf)
-        experiment.add_pytorch_models({'model': m.model})
+    experiment.create(name = 'Tetris_PPO_float16')
+    experiment.configs(conf)
+    m = Main(conf)
+    experiment.add_pytorch_models({'model': m.model})
+    if len(sys.argv) > 1: experiment.load(sys.argv[1])
+    with experiment.start():
         try: m.run_training_loop()
         except Exception as e: print(traceback.format_exc())
         m.destroy()
