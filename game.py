@@ -7,17 +7,25 @@ kH, kW = 20, 10
 kTensorDim = (3, kH, kW)
 kMaxFail = 3
 
+def CalReward(success, score, new_score):
+    if not success: return -0.125
+    #return (score + new_score) ** 2 - score ** 2
+    ret = 0
+    for i in range(new_score):
+        if score + i < 20: ret += 0.5
+        elif score + i < 25: ret += 1
+        elif score + i < 30: ret += 2
+        elif score + i < 35: ret += 3
+        else: ret += 6
+    return ret
+
 class Game:
-    def __init__(self, seed: int):
+    def __init__(self, seed: int, tpow = 1):
         self.args = (0, False)
-        self.env = tetris.Tetris(*self.args)
-        self.env.Seed(seed)
-        # board, current(7), next(7), speed(14)
+        self.tpow = tpow
         self.obs = np.zeros(kTensorDim, dtype = np.uint8)
-        self.set_obs()
-        # keep track of the episode rewards
-        self.rewards = []
-        self.cnt = 0
+        self.env = tetris.Tetris(seed, *self.args)
+        self.reset(False)
 
     def set_obs(self):
         self.obs[:] = 0
@@ -32,27 +40,29 @@ class Game:
          returns a tuple of (observation, reward, done, info).
         """
         suc, score, _ = self.env.Place(*action)
-        reward = score if suc else -0.1
-        self.cnt = 0 if suc else self.cnt + 1
+        reward = CalReward(suc, self.score, score)
+        if suc: self.score += score
+        self.reward += reward
+        self.fail_cnt = 0 if suc else self.fail_cnt + 1
         self.set_obs()
-        # maintain rewards for each step
-        self.rewards.append(reward)
-        over = self.env.over or self.cnt >= kMaxFail
+        over = self.env.over or self.fail_cnt >= kMaxFail
 
         if over:
             # if finished, set episode information if episode is over, and reset
-            episode_info = {"reward": sum(self.rewards), "length": len(self.rewards)}
+            episode_info = {'score': self.score, 'reward': self.reward, 'length': self.length}
             self.reset()
         else:
             episode_info = None
         return self.obs, reward, over, episode_info
 
-    def reset(self):
+    def reset(self, env_reset = True):
         """ Reset environment """
-        self.env.Reset(*self.args)
+        if env_reset: self.env.Reset(*self.args)
         self.set_obs()
-        self.rewards = []
-        self.cnt = 0
+        self.fail_cnt = 0
+        self.length = 0
+        self.reward = 0
+        self.score = 0
         return self.obs
 
 def worker_process(remote: multiprocessing.connection.Connection, seed: int, num: int):

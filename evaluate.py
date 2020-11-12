@@ -4,40 +4,12 @@ import numpy as np, torch, sys, random
 from torch import optim
 from torch.cuda.amp import autocast, GradScaler
 
-from labml.configs import BaseConfigs
-
 from game import Game, kW
-from model import Model, ConvBlock
+from model import Model, ConvBlock, obs_to_torch
+from config import Configs
 
 device = torch.device('cuda')
-
-def obs_to_torch(obs: np.ndarray) -> torch.Tensor:
-    return torch.tensor(obs, dtype = torch.uint8, device = device)
-
-class Configs(BaseConfigs):
-    # #### Configurations
-    # $\gamma$ and $\lambda$ for advantage calculation
-    gamma: float = 0.996
-    lamda: float = 0.95
-    # number of updates
-    updates: int = 80000
-    # number of epochs to train the model with sampled data
-    epochs: int = 2
-    # number of worker processes
-    n_workers: int = 2
-    env_per_worker: int = 16
-    # number of steps to run on each process for a single update
-    worker_steps: int = 128
-    # size of mini batches
-    mini_batch_size: int = 512
-    channels: int = 128
-    blocks: int = 8
-    start_lr: float = 2e-4
-    start_clipping_range: float = 0.2
-    vf_weight: float = 0.5
-    entropy_weight: float = 1e-2
-
-kEnvs = 500
+kEnvs = 2048
 
 if __name__ == "__main__":
     c = Configs()
@@ -59,12 +31,12 @@ if __name__ == "__main__":
         tb = []
         for i in range(kEnvs):
             if finished[i]: continue
-            _, reward, over, _ = envs[i].step((x[i], y[i]))
-            score[i] += reward
-            if over: finished[i] = True
+            _, _, over, info = envs[i].step((x[i], y[i]))
+            if over:
+                score[i] = info['score']
+                finished[i] = True
     score = [(i, j) for j, i in enumerate(score)]
     score.sort()
-    print('mn: %.1f' % score[0][0])
-    for i in [0.01, 0.1, 0.3, 0.5, 0.7, 0.9, 0.99]:
-        print('%.2f: %.1f' % (i, score[int(i * kEnvs)][0]))
-    print('mx: %.1f' % score[-1][0])
+    ds = [0, 0.01, 0.05] + [i * 0.1 for i in range(1, 10)] + [0.95, 0.99, 1 - 1e-5]
+    print(' '.join(['%5.2f' % i for i in ds]))
+    print(' '.join(['%5.1f' % score[int(i * kEnvs)][0] for i in ds]))

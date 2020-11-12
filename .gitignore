@@ -1,4 +1,4 @@
-logs/
+logs
 test/
 .labml.yaml
 __pycache__/

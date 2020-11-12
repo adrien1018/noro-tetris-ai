@@ -8,42 +8,12 @@ from torch import optim
 from torch.cuda.amp import autocast, GradScaler
 
 from labml import monit, tracker, logger, experiment
-from labml.configs import BaseConfigs
 
 from game import Game, Worker, kTensorDim
-from model import Model, ConvBlock
+from model import Model, ConvBlock, obs_to_torch
+from config import Configs
 
 device = torch.device('cuda')
-
-def OutputSMI(msg):
-    x = subprocess.run("nvidia-smi | grep python3", shell = True, capture_output = True)
-    print(msg, os.getpid(), '\n' + x.stdout.decode(), flush = True)
-
-def obs_to_torch(obs: np.ndarray) -> torch.Tensor:
-    return torch.tensor(obs, dtype = torch.uint8, device = device)
-
-class Configs(BaseConfigs):
-    # #### Configurations
-    # $\gamma$ and $\lambda$ for advantage calculation
-    gamma: float = 0.996
-    lamda: float = 0.95
-    # number of updates
-    updates: int = 80000
-    # number of epochs to train the model with sampled data
-    epochs: int = 2
-    # number of worker processes
-    n_workers: int = 2
-    env_per_worker: int = 16
-    # number of steps to run on each process for a single update
-    worker_steps: int = 128
-    # size of mini batches
-    mini_batch_size: int = 512
-    channels: int = 128
-    blocks: int = 8
-    start_lr: float = 2e-4
-    start_clipping_range: float = 0.2
-    vf_weight: float = 0.5
-    entropy_weight: float = 1e-2
 
 class SortedQueue:
     def __init__(self, sz):
@@ -70,7 +40,7 @@ class Main:
         # #### Initialize
         # create workers
         self.workers = [Worker(47 + i, c.env_per_worker) for i in range(self.c.n_workers)]
-        self.reward_queue = SortedQueue(400)
+        self.score_queue = SortedQueue(400)
 
         # initialize tensors for observations
         self.obs = np.zeros((self.envs, *kTensorDim))
@@ -129,13 +99,14 @@ class Main:
                 # We also add a game frame to it for monitoring.
                 for info in info_arr:
                     if not info: continue
-                    self.reward_queue.add(info['reward'])
+                    self.score_queue.add(info['score'])
                     tracker.add('reward', info['reward'])
-                    tracker.add('reward_per01', self.reward_queue.get_ratio(0.01))
-                    tracker.add('reward_per10', self.reward_queue.get_ratio(0.1))
-                    tracker.add('reward_per50', self.reward_queue.get_ratio(0.5))
-                    tracker.add('reward_per90', self.reward_queue.get_ratio(0.9))
-                    tracker.add('reward_per99', self.reward_queue.get_ratio(0.99))
+                    tracker.add('score', info['score'])
+                    tracker.add('score_per01', self.score_queue.get_ratio(0.01))
+                    tracker.add('score_per10', self.score_queue.get_ratio(0.1))
+                    tracker.add('score_per50', self.score_queue.get_ratio(0.5))
+                    tracker.add('score_per90', self.score_queue.get_ratio(0.9))
+                    tracker.add('score_per99', self.score_queue.get_ratio(0.99))
                     tracker.add('length', info['length'])
             self.obs = obs_to_torch(self.obs)
 
@@ -183,17 +154,9 @@ class Main:
 
     def train(self, samples: Dict[str, torch.Tensor], learning_rate: float, clip_range: float):
         """### Train the model based on samples"""
-
-        # It learns faster with a higher number of epochs,
-        #  but becomes a little unstable; that is,
-        #  the average episode reward does not monotonically increase
-        #  over time.
-        # May be reducing the clipping range might solve it.
         for _ in range(self.c.epochs):
             # shuffle for each epoch
             indexes = torch.randperm(self.batch_size)
-
-            # for each mini batch
             for start in range(0, self.batch_size, self.c.mini_batch_size):
                 # get mini batch
                 end = start + self.c.mini_batch_size
@@ -201,7 +164,6 @@ class Main:
                 mini_batch = {}
                 for k, v in samples.items():
                     mini_batch[k] = v[mini_batch_indexes]
-
                 # train
                 loss = self._calc_loss(clip_range = clip_range,
                                        samples = mini_batch)
@@ -223,39 +185,17 @@ class Main:
 
     def _calc_loss(self, samples: Dict[str, torch.Tensor], clip_range: float) -> torch.Tensor:
         """## PPO Loss"""
-
         # $R_t$ returns sampled from $\pi_{\theta_{OLD}}$
         sampled_return = samples['values'] + samples['advantages']
-
-        # $\bar{A_t} = \frac{\hat{A_t} - \mu(\hat{A_t})}{\sigma(\hat{A_t})}$,
-        # where $\hat{A_t}$ is advantages sampled from $\pi_{\theta_{OLD}}$.
-        # Refer to sampling function in [Main class](#main) below
-        #  for the calculation of $\hat{A}_t$.
         sampled_normalized_advantage = self._normalize(samples['advantages'])
-
         # Sampled observations are fed into the model to get $\pi_\theta(a_t|s_t)$ and $V^{\pi_\theta}(s_t)$;
-        #  we are treating observations as state
         pi, value = self.model(samples['obs'])
 
         # #### Policy
-
-        # $-\log \pi_\theta (a_t|s_t)$, $a_t$ are actions sampled from $\pi_{\theta_{OLD}}$
         log_pi = pi.log_prob(samples['actions'])
-
-        # ratio $r_t(\theta) = \frac{\pi_\theta (a_t|s_t)}{\pi_{\theta_{OLD}} (a_t|s_t)}$;
         # *this is different from rewards* $r_t$.
         ratio = torch.exp(log_pi - samples['log_pis'])
-
         # The ratio is clipped to be close to 1.
-        # We take the minimum so that the gradient will only pull
-        # $\pi_\theta$ towards $\pi_{\theta_{OLD}}$ if the ratio is
-        # not between $1 - \epsilon$ and $1 + \epsilon$.
-        # This keeps the KL divergence between $\pi_\theta$
-        #  and $\pi_{\theta_{OLD}}$ constrained.
-        # Large deviation can cause performance collapse;
-        #  where the policy performance drops and doesn't recover because
-        #  we are sampling from a bad policy.
-        #
         # Using the normalized advantage
         #  $\bar{A_t} = \frac{\hat{A_t} - \mu(\hat{A_t})}{\sigma(\hat{A_t})}$
         #  introduces a bias to the policy gradient estimator,
@@ -267,25 +207,16 @@ class Main:
         policy_reward = policy_reward.mean()
 
         # #### Entropy Bonus
-
-        # $\mathcal{L}^{EB}(\theta) =
-        #  \mathbb{E}\Bigl[ S\bigl[\pi_\theta\bigr] (s_t) \Bigr]$
         entropy_bonus = pi.entropy()
         entropy_bonus = entropy_bonus.mean()
 
         # #### Value
-
         # Clipping makes sure the value function $V_\theta$ doesn't deviate
         #  significantly from $V_{\theta_{OLD}}$.
-        clipped_value = samples['values'] + (value - samples['values']).clamp(min = -clip_range,
-                                                                              max = clip_range)
+        clipped_value = samples['values'] + (value - samples['values']).clamp(
+                min = -clip_range, max = clip_range)
         vf_loss = torch.max((value - sampled_return) ** 2, (clipped_value - sampled_return) ** 2)
         vf_loss = 0.5 * vf_loss.mean()
-
-        # $\mathcal{L}^{CLIP+VF+EB} (\theta) =
-        #  \mathcal{L}^{CLIP} (\theta) -
-        #  c_1 \mathcal{L}^{VF} (\theta) + c_2 \mathcal{L}^{EB}(\theta)$
-
         # we want to maximize $\mathcal{L}^{CLIP+VF+EB}(\theta)$
         # so we take the negative of it as the loss
         loss = -(policy_reward - self.c.vf_weight * vf_loss + self.c.entropy_weight * entropy_bonus)
@@ -293,13 +224,11 @@ class Main:
         # for monitoring
         approx_kl_divergence = .5 * ((samples['log_pis'] - log_pi) ** 2).mean()
         clip_fraction = (abs((ratio - 1.0)) > clip_range).to(torch.float).mean()
-
         tracker.add({'policy_reward': policy_reward,
                      'vf_loss': vf_loss,
                      'entropy_bonus': entropy_bonus,
                      'kl_div': approx_kl_divergence,
                      'clip_fraction': clip_fraction})
-
         return loss
 
     def run_training_loop(self):
@@ -327,7 +256,7 @@ class Main:
 
 if __name__ == "__main__":
     conf = Configs()
-    experiment.create(name = 'Tetris_PPO_float16')
+    experiment.create(name = 'Tetris_PPO_float16_adjusted_large')
     experiment.configs(conf)
     m = Main(conf)
     experiment.add_pytorch_models({'model': m.model})

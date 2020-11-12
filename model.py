@@ -63,3 +63,6 @@ class Model(nn.Module):
         value = self.value(x).reshape(-1)
         pi_sample = Categorical(logits = torch.clamp(pi, -30, 30))
         return pi_sample, value
+
+def obs_to_torch(obs: np.ndarray) -> torch.Tensor:
+    return torch.tensor(obs, dtype = torch.uint8, device = torch.device('cuda'))

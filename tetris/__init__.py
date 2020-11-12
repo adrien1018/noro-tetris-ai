@@ -2,7 +2,6 @@ from .Tetris_Internal import *
 import numpy as np
 import random
 
-kCumW = [33, 65, 97, 129, 162, 193, 224]
 kLimits = [9, 8, 7, 6, 5, 4, 3, 3, 2, 2, 2, 2, 2]
 kSpeed = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 10, 11, 11, 11, 12, 12, 12,
           13, 13, 13, 13, 13, 13, 13, 13, 13, 13]
@@ -13,22 +12,28 @@ def GetAllowed(board, k, rot, lim):
     Allowed(board.data, k, rot, lim, ret.data)
     return ret
 
-def GetRand(k = 1):
-    return random.choices(range(7), cum_weights = kCumW, k = k)
+def GetRand(prev = None):
+    if prev is None: prev = random.randint(0, 6)
+    res = random.randint(0, 7)
+    if res != 7 and res != prev: return res
+    kTable = [2, 0, 1, 3, 4, 0, 4]
+    return (random.randint(0, 7) + kTable[prev]) % 7
 
 class Tetris:
-    def __init__(self, start = 0, rotate = True):
+    def __init__(self, seed = None, start = 0, rotate = True):
+        self.random = random.Random()
+        if seed is not None: self.Seed(seed)
         self.Reset(start, rotate)
 
     def Reset(self, start = 0, rotate = True):
         self.board = np.zeros((20, 10), dtype = 'int32')
-        self.cur, self.nxt = GetRand(2)
+        self.cur = GetRand()
+        self.nxt = GetRand(self.cur)
         self.lines = 0
         self.start = start
         self.rotate = rotate
         self._SetInternal()
         self.over = False
-        self.random = random.Random()
 
     def Seed(self, seed):
         self.random.seed(seed)
@@ -52,6 +57,6 @@ class Tetris:
         if self.allowed[g,x,y] == 0: return False, None, None
         num = Place(self.board.data, self.cur, g, x, y, 1, True)
         self.lines += num
-        self.cur, self.nxt = self.nxt, GetRand()[0]
+        self.cur, self.nxt = self.nxt, GetRand(self.nxt)
         self._SetInternal()
         return True, num, (self.level + 1) * kScore[num]
