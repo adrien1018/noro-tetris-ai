@@ -12,11 +12,9 @@ def CalReward(success, score, new_score):
     #return (score + new_score) ** 2 - score ** 2
     ret = 0
     for i in range(new_score):
-        if score + i < 20: ret += 0.5
-        elif score + i < 25: ret += 1
-        elif score + i < 30: ret += 2
-        elif score + i < 35: ret += 3
-        else: ret += 6
+        if score + i < 30: ret += 0.5
+        elif score + i < 35: ret += 4
+        else: ret += 8
     return ret
 
 class Game:
@@ -43,6 +41,7 @@ class Game:
         reward = CalReward(suc, self.score, score)
         if suc: self.score += score
         self.reward += reward
+        self.length += 1
         self.fail_cnt = 0 if suc else self.fail_cnt + 1
         self.set_obs()
         over = self.env.over or self.fail_cnt >= kMaxFail

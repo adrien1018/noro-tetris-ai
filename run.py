@@ -55,7 +55,7 @@ class Main:
 
         # optimizer
         self.scaler = GradScaler()
-        self.optimizer = optim.Adam(self.model.parameters(), lr = self.c.start_lr)
+        self.optimizer = optim.Adam(self.model.parameters(), lr = self.c.lr)
 
     def w_range(self, x): return slice(x * self.c.env_per_worker, (x + 1) * self.c.env_per_worker)
 
@@ -152,7 +152,7 @@ class Main:
                 last_value = values[:, t]
         return advantages
 
-    def train(self, samples: Dict[str, torch.Tensor], learning_rate: float, clip_range: float):
+    def train(self, samples: Dict[str, torch.Tensor]):
         """### Train the model based on samples"""
         for _ in range(self.c.epochs):
             # shuffle for each epoch
@@ -165,11 +165,9 @@ class Main:
                 for k, v in samples.items():
                     mini_batch[k] = v[mini_batch_indexes]
                 # train
-                loss = self._calc_loss(clip_range = clip_range,
+                loss = self._calc_loss(clip_range = self.c.clipping_range,
                                        samples = mini_batch)
                 # compute gradients
-                for pg in self.optimizer.param_groups:
-                    pg['lr'] = learning_rate
                 self.optimizer.zero_grad()
                 self.scaler.scale(loss).backward()
                 self.scaler.unscale_(self.optimizer)
@@ -237,13 +235,10 @@ class Main:
         for _ in monit.loop(self.c.updates - offset):
             update = tracker.get_global_step()
             progress = update / self.c.updates
-            # decreasing `learning_rate` and `clip_range` $\epsilon$
-            learning_rate = self.c.start_lr * (1 - progress)
-            clip_range = self.c.start_clipping_range * (1 - progress)
             # sample with current policy
             samples = self.sample()
             # train the model
-            self.train(samples, learning_rate, clip_range)
+            self.train(samples)
             # write summary info to the writer, and log to the screen
             tracker.save()
             logger.log()
@@ -256,7 +251,7 @@ class Main:
 
 if __name__ == "__main__":
     conf = Configs()
-    experiment.create(name = 'Tetris_PPO_float16_adjusted_large')
+    experiment.create(name = 'Tetris_PPO_float16_adjusted2_large')
     experiment.configs(conf)
     m = Main(conf)
     experiment.add_pytorch_models({'model': m.model})

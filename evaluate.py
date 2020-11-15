@@ -14,7 +14,8 @@ kEnvs = 2048
 if __name__ == "__main__":
     c = Configs()
     model = Model(c.channels.value, c.blocks.value).to(device)
-    model.load_state_dict(torch.load(sys.argv[1])[0].state_dict())
+    if sys.argv[1][-3:] == 'pkl': model.load_state_dict(torch.load(sys.argv[1])[0].state_dict())
+    else: model.load_state_dict(torch.load(sys.argv[1]))
     model.eval()
     envs = [Game(random.randint(0, 2**32-1)) for i in range(kEnvs)]
     finished = [False for i in range(kEnvs)]
