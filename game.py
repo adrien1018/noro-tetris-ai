@@ -13,7 +13,7 @@ def CalReward(success, score, new_score):
     ret = 0
     for i in range(new_score):
         if score + i < 30: ret += 0.5
-        elif score + i < 35: ret += 4
+        elif score + i < 35: ret += 3
         else: ret += 8
     return ret
 
@@ -31,6 +31,7 @@ class Game:
         self.obs[1] = self.env.allowed[0]
         self.obs[2,0,0] = self.env.cur
         self.obs[2,0,1] = self.env.nxt
+        self.obs[2,0,2] = self.score
 
     def step(self, action):
         """
@@ -57,11 +58,11 @@ class Game:
     def reset(self, env_reset = True):
         """ Reset environment """
         if env_reset: self.env.Reset(*self.args)
-        self.set_obs()
         self.fail_cnt = 0
         self.length = 0
         self.reward = 0
         self.score = 0
+        self.set_obs()
         return self.obs
 
 def worker_process(remote: multiprocessing.connection.Connection, seed: int, num: int):

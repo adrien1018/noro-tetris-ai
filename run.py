@@ -55,7 +55,7 @@ class Main:
 
         # optimizer
         self.scaler = GradScaler()
-        self.optimizer = optim.Adam(self.model.parameters(), lr = self.c.lr)
+        self.optimizer = optim.Adam(self.model.parameters(), lr = self.c.lr, weight_decay = self.c.reg_l2)
 
     def w_range(self, x): return slice(x * self.c.env_per_worker, (x + 1) * self.c.env_per_worker)
 
@@ -251,7 +251,7 @@ class Main:
 
 if __name__ == "__main__":
     conf = Configs()
-    experiment.create(name = 'Tetris_PPO_float16_adjusted2_large')
+    experiment.create(name = 'Tetris_PPO_float16_adjusted_l2reg')
     experiment.configs(conf)
     m = Main(conf)
     experiment.add_pytorch_models({'model': m.model})
