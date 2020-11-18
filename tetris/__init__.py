@@ -12,23 +12,23 @@ def GetAllowed(board, k, rot, lim):
     Allowed(board.data, k, rot, lim, ret.data)
     return ret
 
-def GetRand(prev = None):
-    if prev is None: prev = random.randint(0, 6)
-    res = random.randint(0, 7)
+def GetRand(rand, prev = None):
+    if prev is None: prev = rand.randint(0, 6)
+    res = rand.randint(0, 7)
     if res != 7 and res != prev: return res
     kTable = [2, 0, 1, 3, 4, 0, 4]
-    return (random.randint(0, 7) + kTable[prev]) % 7
+    return (rand.randint(0, 7) + kTable[prev]) % 7
 
 class Tetris:
-    def __init__(self, seed = None, start = 0, rotate = True):
+    def __init__(self, seed = None, start = 0, rotate = True, cur = None, nxt = None):
         self.random = random.Random()
         if seed is not None: self.Seed(seed)
         self.Reset(start, rotate)
 
-    def Reset(self, start = 0, rotate = True):
+    def Reset(self, start = 0, rotate = True, cur = None, nxt = None):
         self.board = np.zeros((20, 10), dtype = 'int32')
-        self.cur = GetRand()
-        self.nxt = GetRand(self.cur)
+        self.cur = GetRand(self.random) if cur is None else cur
+        self.nxt = GetRand(self.random, self.cur) if nxt is None else nxt
         self.lines = 0
         self.start = start
         self.rotate = rotate
@@ -50,13 +50,13 @@ class Tetris:
         self.allowed = GetAllowed(self.board, self.cur, self.rotate, lim)
         self.over = not np.any(self.allowed)
 
-    def Place(self, a1, a2, a3 = None):
+    def Place(self, a1, a2, a3 = None, t_nxt = None):
         if self.over: return False, None, None
         if self.rotate: g, x, y = a1, a2, a3
         else: g, x, y = 0, a1, a2
         if self.allowed[g,x,y] == 0: return False, None, None
         num = Place(self.board.data, self.cur, g, x, y, 1, True)
         self.lines += num
-        self.cur, self.nxt = self.nxt, GetRand(self.nxt)
+        self.cur, self.nxt = self.nxt, (GetRand(self.random, self.nxt) if t_nxt is None else t_nxt)
         self._SetInternal()
         return True, num, (self.level + 1) * kScore[num]

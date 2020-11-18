@@ -39,7 +39,7 @@ class Main:
 
         # #### Initialize
         # create workers
-        self.workers = [Worker(47 + i, c.env_per_worker) for i in range(self.c.n_workers)]
+        self.workers = [Worker(27 + i, c.env_per_worker) for i in range(self.c.n_workers)]
         self.score_queue = SortedQueue(400)
 
         # initialize tensors for observations

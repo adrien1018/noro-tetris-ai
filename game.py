@@ -25,7 +25,15 @@ class Game:
         self.env = tetris.Tetris(seed, *self.args)
         self.reset(False)
 
-    def set_obs(self):
+    def set_state(self, cur, nxt, board = None):
+        if board is None: board = np.zeros((20, 10), dtype = 'int32')
+        self.env.board = board.astype('int32')
+        self.env.cur = cur
+        self.env.nxt = nxt
+        self.env._SetInternal()
+        self._set_obs()
+
+    def _set_obs(self):
         self.obs[:] = 0
         self.obs[0] = 1 - self.env.board
         self.obs[1] = self.env.allowed[0]
@@ -33,18 +41,18 @@ class Game:
         self.obs[2,0,1] = self.env.nxt
         self.obs[2,0,2] = self.score
 
-    def step(self, action):
+    def step(self, action, **kwargs):
         """
         Executes `action` (x, y)
          returns a tuple of (observation, reward, done, info).
         """
-        suc, score, _ = self.env.Place(*action)
+        suc, score, _ = self.env.Place(*action, **kwargs)
         reward = CalReward(suc, self.score, score)
         if suc: self.score += score
         self.reward += reward
         self.length += 1
         self.fail_cnt = 0 if suc else self.fail_cnt + 1
-        self.set_obs()
+        self._set_obs()
         over = self.env.over or self.fail_cnt >= kMaxFail
 
         if over:
@@ -62,7 +70,7 @@ class Game:
         self.length = 0
         self.reward = 0
         self.score = 0
-        self.set_obs()
+        self._set_obs()
         return self.obs
 
 def worker_process(remote: multiprocessing.connection.Connection, seed: int, num: int):

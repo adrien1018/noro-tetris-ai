@@ -31,7 +31,6 @@ class Model(nn.Module):
                 nn.ReLU(True),
                 )
         self.res = nn.Sequential(*[ConvBlock(ch) for i in range(blk)])
-        # A fully connected layer to get logits for $\pi$
         self.pi_logits_head = nn.Sequential(
                 nn.Conv2d(ch, 4, 1),
                 nn.BatchNorm2d(4),
@@ -39,7 +38,6 @@ class Model(nn.Module):
                 nn.ReLU(True),
                 nn.Linear(4 * kH * kW, kH * kW)
                 )
-        # A fully connected layer to get value function
         self.value = nn.Sequential(
                 nn.Conv2d(ch, 1, 1),
                 nn.BatchNorm2d(1),
@@ -60,7 +58,8 @@ class Model(nn.Module):
         x = self.start(q)
         x = self.res(x)
         pi = self.pi_logits_head(x)
-        pi -= (1 - obs[:,1].view(-1, kH * kW)) * 20
+        if self.training: pi -= (1 - obs[:,1].view(-1, kH * kW)) * 20
+        else: pi[obs[:,1].view(-1, kH * kW) == 0] = -30
         value = self.value(x).reshape(-1)
         pi_sample = Categorical(logits = torch.clamp(pi, -30, 30))
         return pi_sample, value
