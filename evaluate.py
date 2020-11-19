@@ -35,9 +35,9 @@ if __name__ == "__main__":
             if over:
                 score[i] = info['score']
                 finished[i] = True
-    print(len([i for i in score if i > 35]))
-    #score = [(i, j) for j, i in enumerate(score)]
-    #score.sort()
-    #ds = [0, 0.01, 0.05] + [i * 0.1 for i in range(1, 10)] + [0.95, 0.99, 1 - 1e-5]
-    #print(' '.join(['%5.2f' % i for i in ds]))
-    #print(' '.join(['%5.1f' % score[int(i * kEnvs)][0] for i in ds]))
+    score = [(i, j) for j, i in enumerate(score)]
+    score.sort()
+    ds = [0, 0.01, 0.05] + [i * 0.1 for i in range(1, 10)] + [0.95, 0.99, 1 - 1e-5]
+    print(' '.join(['%5.2f' % i for i in ds]))
+    print(' '.join(['%5.1f' % score[int(i * kEnvs)][0] for i in ds]))
+    print('>35:', len([0 for i in score if i[0] > 35]))
