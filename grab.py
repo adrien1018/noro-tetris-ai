@@ -91,19 +91,29 @@ from game import kH, kW
 import tetris
 import tetris.Tetris_Internal
 
-def PrintStrat(model, board, now, nxt):
+def PrintMoves(m):
+    lst = []
+    for i, j in m:
+        if len(lst) == 0 or lst[-1][0] != i: lst.append((i, []))
+        lst[-1][1].append('.DLRAB'[j])
+    print(' '.join(['{}:'.format(i) + ''.join(j) for i, j in lst]))
+
+def PrintStrat(model, board, now, nxt, score):
     obs = np.zeros((3, kH, kW), dtype = 'uint8')
     obs[0] = 1 - board
-    obs[1] = tetris.GetAllowed(board, now, False, 9)
+    obs[1], t_dir = tetris.GetAllowed(board, now, False, 9, True)
     obs[2,0,0] = now
     obs[2,0,1] = nxt
+    obs[2,0,2] = score
     with torch.no_grad():
         pi = model(obs_to_torch(obs).unsqueeze(0))[0]
         act = torch.argmax(pi.probs, 1).item()
         x, y = act // kW, act % kW
     s = board.astype('int32')
     tetris.Tetris_Internal.Place(s.data, now, 0, x, y, 2, True)
-    print(s, flush = True)
+    print(s)
+    PrintMoves(tetris.Tetris_Internal.Moves(t_dir, now, False, 0, x, y))
+    sys.stdout.flush()
 
 def Loop(model):
     print('Ready', flush = True)
@@ -121,21 +131,22 @@ def Loop(model):
     nxt = cap.GetNext()
     assert (board[0:2,3:7] - Capture.kBlocks[now]).min() == 0
     board[0:2,3:7] -= Capture.kBlocks[now]
-    ##
-    PrintStrat(model, board, now, nxt)
+    PrintStrat(model, board, now, nxt, 0)
     prev = cap.arr[176:384,128:144]
+    N = 0
     while True:
         while True:
             arr = cap.Capture()
             if not (arr[176:384,128:144] == prev).all() and \
                 arr.sum() > 0: break
         if cap.GetMode() != 'dc25f53685046447': return
+        N += 1
         now, nxt = nxt, cap.GetNext()
         board = cap.GetBoard()
         assert (board[0:2,3:7] - Capture.kBlocks[now]).min() == 0
         board[0:2,3:7] -= Capture.kBlocks[now]
-        ##
-        PrintStrat(model, board, now, nxt)
+        score = (N * 4 - board.sum()) // 10
+        PrintStrat(model, board, now, nxt, score)
         prev = arr[176:384,128:144]
 
 if __name__ == "__main__":

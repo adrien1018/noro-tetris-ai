@@ -5,7 +5,11 @@
 #include <vector>
 #include <utility>
 #include <algorithm>
+#if __has_include(<python3.8/Python.h>)
 #include <python3.8/Python.h>
+#else
+#include <Python.h>
+#endif
 
 using Entry = int32_t;
 using Poly = std::array<std::pair<int, int>, 4>;
@@ -40,11 +44,11 @@ using Vis = std::vector<std::array<std::array<int8_t, kM + 2>, kN + 2>>;
 void DFS(int g, int x, int y, int t, int mx_t, bool rotate, Vis& vis) {
   vis[g][x][y] = t;
   if (t < mx_t) {
-    int g1 = g == (int)vis.size() - 1 ? 0 : g + 1;
-    int g2 = g == 0 ? vis.size() - 1 : g - 1;
     if (vis[g][x][y-1] > t+1) DFS(g, x, y-1, t+1, mx_t, rotate, vis);
     if (vis[g][x][y+1] > t+1) DFS(g, x, y+1, t+1, mx_t, rotate, vis);
-    if (rotate) {
+    if (rotate && vis.size() != 1) {
+      int g1 = g == (int)vis.size() - 1 ? 0 : g + 1;
+      int g2 = g == 0 ? vis.size() - 1 : g - 1;
       if (vis[g1][x][y] > t+1) DFS(g1, x, y, t+1, mx_t, rotate, vis);
       if (vis[g2][x][y] > t+1) DFS(g2, x, y, t+1, mx_t, rotate, vis);
     }
@@ -83,7 +87,7 @@ struct Node {
   bool operator<(const Node& a) const { return w > a.w; }
 };
 
-Vis Dijkstra(const Vis& v) {
+Vis Dijkstra(const Vis& v, bool rotate) {
   Vis ret(v.size(), decltype(v[0]){});
   if (v[0][0+1][5+1] < 0) return ret;
   std::vector<std::array<std::array<Weight, kM + 2>, kN + 2>> d(v.size());
@@ -106,10 +110,12 @@ Vis Dijkstra(const Vis& v) {
     Relax(nd.g, nd.x + 1, nd.y, nd.w, 1);
     Relax(nd.g, nd.x, nd.y - 1, wp, 2);
     Relax(nd.g, nd.x, nd.y + 1, wp, 3);
-    int g1 = nd.g == (int)v.size() - 1 ? 0 : nd.g + 1;
-    int g2 = nd.g == 0 ? v.size() - 1 : nd.g - 1;
-    Relax(g1, nd.x, nd.y, wp, 4);
-    Relax(g2, nd.x, nd.y, wp, 5);
+    if (rotate && v.size() != 1) {
+      int g1 = nd.g == (int)v.size() - 1 ? 0 : nd.g + 1;
+      int g2 = nd.g == 0 ? v.size() - 1 : nd.g - 1;
+      Relax(g1, nd.x, nd.y, wp, 4);
+      Relax(g2, nd.x, nd.y, wp, 5);
+    }
   }
   return ret;
 }
@@ -117,27 +123,27 @@ Vis Dijkstra(const Vis& v) {
 void Allowed(void* buf, int kind, bool rotate, int limit, void* ret_buf,
              int len, void* dir_buf, int len_dir) {
   Row* input = (Row*)buf;
-  Vis vis = GetVis(input, kind), dir;
-  if (vis[0][0+1][5+1] != -1) {
-    if (dir_buf) dir = Dijkstra(vis);
-    DFS(0, 0+1, 5+1, 0, limit, rotate, vis);
-  }
+  Vis vis = GetVis(input, kind);
+  Vis dir;
+  if (dir_buf) dir = Dijkstra(vis, rotate);
+  if (vis[0][0+1][5+1] != -1) DFS(0, 0+1, 5+1, 0, limit, rotate, vis);
   Table* ret = (Table*)ret_buf;
   Table* ret_dir = (Table*)dir_buf;
-  for (int g = 0; g < (int)vis.size(); g++) {
+  int G = rotate ? vis.size() : 1;
+  for (int g = 0; g < G; g++) {
     for (int x = 1; x <= kN; x++) {
       for (int y = 1; y <= kM; y++) {
         ret[g][x - 1][y - 1] = vis[g][x + 1][y] == -1 && vis[g][x][y] != -1 &&
                                vis[g][x][y] <= limit;
-        if (ret_dir) ret_dir[g][x - 1][y - 1] = dir[g][x][y];
+        if (dir_buf) ret_dir[g][x - 1][y - 1] = dir[g][x][y];
       }
     }
   }
-  for (int i = kN * kM * vis.size() * sizeof(Entry); i < len; i++) {
+  for (int i = kN * kM * G * sizeof(Entry); i < len; i++) {
     ((uint8_t*)ret_buf)[i] = 0;
   }
   if (dir_buf) {
-    for (int i = kN * kM * vis.size() * sizeof(Entry); i < len_dir; i++) {
+    for (int i = kN * kM * G * sizeof(Entry); i < len_dir; i++) {
       ((uint8_t*)dir_buf)[i] = 0;
     }
   }
@@ -204,10 +210,10 @@ using mrand = std::uniform_int_distribution<int>;
 int main() {
   for (int i = 0, cnt = 0;; i++) {
     if (i % 100 == 0) printf("%d %d\n", i, cnt);
-    int a[20][10]{}, b[4][20][10]{};
+    int a[20][10]{}, b[4][20][10]{}, c[4][20][10]{};
     for (;; cnt++) {
       int k = mrand(0, 6)(gen);
-      internal::Allowed((void*)a, k, true, 2, (void*)b, sizeof(b));
+      internal::Allowed((void*)a, k, true, 8, (void*)b, sizeof(b), (void*)c, sizeof(c));
       int sum = 0;
       for (int i = 0; i < 4; i++) for (int j = 0; j < 20; j++) for (int k = 0; k < 10; k++) sum += b[i][j][k];
       if (!sum) break;
@@ -220,6 +226,7 @@ int main() {
         }
       }
       internal::Place((void*)a, k, d, x, y, 1);
+      assert(internal::Moves(c, kBlocks[k].size(), d, x, y).size() < 100);
       /*for (int j = 0; j < 20; j++) {
         for (int k = 0; k < 10; k++) printf("%d ", a[j][k]);
         printf("||");
@@ -250,12 +257,14 @@ static PyObject* Allowed(PyObject *self, PyObject *args) {
     PyErr_SetString(PyExc_ValueError, "incorrect buffer length");
     PyBuffer_Release(&buf);
     PyBuffer_Release(&ret_buf);
+    if (dir_buf.buf) PyBuffer_Release(&dir_buf);
     return nullptr;
   }
   internal::Allowed(buf.buf, kind, rotate, limit, ret_buf.buf, ret_buf.len,
                     dir_buf.buf, dir_buf.len);
   PyBuffer_Release(&buf);
   PyBuffer_Release(&ret_buf);
+  if (dir_buf.buf) PyBuffer_Release(&dir_buf);
   Py_RETURN_NONE;
 }
 

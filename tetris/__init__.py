@@ -7,10 +7,15 @@ kSpeed = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 10, 11, 11, 11, 12, 12, 12,
           13, 13, 13, 13, 13, 13, 13, 13, 13, 13]
 kScore = [0, 40, 100, 300, 1200]
 
-def GetAllowed(board, k, rot, lim):
+def GetAllowed(board, k, rot, lim, with_dir = False):
     ret = np.zeros((4 if rot else 1, 20, 10), dtype = 'int32')
-    Allowed(board.data, k, rot, lim, ret.data)
-    return ret
+    if with_dir:
+        ret_dir = np.zeros_like(ret)
+        Allowed(board.data, k, rot, lim, ret.data, ret_dir.data)
+        return ret, ret_dir
+    else:
+        Allowed(board.data, k, rot, lim, ret.data)
+        return ret
 
 def GetRand(rand, prev = None):
     if prev is None: prev = rand.randint(0, 6)
