@@ -253,17 +253,22 @@ import argparse
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument('name')
     parser.add_argument('uuid', nargs = '?', default = '')
     conf = Configs()
     keys = conf._to_json()
     for key in keys:
         parser.add_argument('--' + key.replace('_', '-'), type = type(conf.__getattribute__(key)))
     args = vars(parser.parse_args())
-    print(args)
     override_dict = {}
     for key in keys:
         if args[key] is not None: override_dict[key] = args[key]
-    experiment.create(name = 'Tetris_PPO_float16_adjusted_l2reg')
+    try:
+        if len(args['name']) == 32:
+            int(args['name'], 16)
+            parser.error('Experiment name should not be uuid-like')
+    except ValueError: pass
+    experiment.create(name = args['name'])
     conf = Configs()
     experiment.configs(conf, override_dict)
     m = Main(conf)
