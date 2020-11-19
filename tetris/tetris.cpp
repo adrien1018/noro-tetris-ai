@@ -1,17 +1,15 @@
 #define PY_SSIZE_T_CLEAN
 #include <cstdint>
 #include <array>
+#include <queue>
 #include <vector>
 #include <utility>
+#include <algorithm>
 #include <python3.8/Python.h>
 
-const int kN = 20, kM = 10;
 using Entry = int32_t;
-using Row = Entry[kM];
-using Table = Entry[kN][kM];
 using Poly = std::array<std::pair<int, int>, 4>;
-using Vis = std::vector<std::array<std::array<int8_t, kM + 2>, kN + 2>>;
-
+const int kN = 20, kM = 10;
 const std::vector<Poly> kBlocks[] = {
     {{{{1, 0}, {0, 0}, {0, 1}, {0, -1}}}, // T
      {{{1, 0}, {0, 0}, {-1, 0}, {0, -1}}},
@@ -34,6 +32,10 @@ const std::vector<Poly> kBlocks[] = {
      {{{-2, 0}, {-1, 0}, {0, 0}, {1, 0}}}}};
 
 namespace internal {
+
+using Row = Entry[kM];
+using Table = Entry[kN][kM];
+using Vis = std::vector<std::array<std::array<int8_t, kM + 2>, kN + 2>>;
 
 void DFS(int g, int x, int y, int t, int mx_t, bool rotate, Vis& vis) {
   vis[g][x][y] = t;
@@ -66,40 +68,77 @@ Vis GetVis(Row* input, int kind) {
           }
         }
         ret[g][x + 1][y + 1] = flag ? 127 : -1;
-        //printf("!%d %d %d %d\n", (int)g, x, y, (int)flag);
       }
     }
   }
   return ret;
 }
 
-void Allowed(void* buf, int kind, bool rotate, int limit, void* ret_buf, int len) {
-  Row* input = (Row*)buf;
-  Vis vis = GetVis(input, kind);
-  if (vis[0][0+1][5+1] != -1) DFS(0, 0+1, 5+1, 0, limit, rotate, vis);
-  if (rotate) {
-    Table* ret = (Table*)ret_buf;
-    for (int g = 0; g < (int)vis.size(); g++) {
-      for (int x = 1; x <= kN; x++) {
-        for (int y = 1; y <= kM; y++) {
-          ret[g][x - 1][y - 1] = vis[g][x + 1][y] == -1 && vis[g][x][y] != -1 &&
-                                 vis[g][x][y] <= limit;
-        }
+using Weight = std::pair<uint16_t, uint16_t>;
+
+struct Node {
+  // dir: 1(down) 2(left) 3(right) 4(rotateL) 5(rotateR)
+  int g, x, y, dir;
+  Weight w;
+  bool operator<(const Node& a) const { return w > a.w; }
+};
+
+Vis Dijkstra(const Vis& v) {
+  Vis ret(v.size(), decltype(v[0]){});
+  if (v[0][0+1][5+1] < 0) return ret;
+  std::vector<std::array<std::array<Weight, kM + 2>, kN + 2>> d(v.size());
+  for (auto& i : d) for (auto& j : i) for (auto& k : j) k = {127, 0};
+  std::priority_queue<Node> pq;
+  pq.push({0, 0+1, 5+1, 0, {0, 0}});
+  d[0][0+1][5+1] = {0, 0};
+  while (!pq.empty()) {
+    Node nd = pq.top();
+    pq.pop();
+    if (d[nd.g][nd.x][nd.y] < nd.w) continue;
+    ret[nd.g][nd.x][nd.y] = nd.dir;
+    Weight wp = {nd.w.first + 1, nd.w.second + 128 + nd.x};
+    auto Relax = [&](int g, int x, int y, Weight w, uint8_t dir) {
+      if (v[g][x][y] > 0 && w < d[g][x][y]) {
+        pq.push({g, x, y, dir, w});
+        d[g][x][y] = w;
       }
-    }
-    for (int i = kN * kM * vis.size() * sizeof(Entry); i < len; i++) {
-      ((uint8_t*)ret_buf)[i] = 0;
-    }
-  } else {
-    Row* ret = (Row*)ret_buf;
+    };
+    Relax(nd.g, nd.x + 1, nd.y, nd.w, 1);
+    Relax(nd.g, nd.x, nd.y - 1, wp, 2);
+    Relax(nd.g, nd.x, nd.y + 1, wp, 3);
+    int g1 = nd.g == (int)v.size() - 1 ? 0 : nd.g + 1;
+    int g2 = nd.g == 0 ? v.size() - 1 : nd.g - 1;
+    Relax(g1, nd.x, nd.y, wp, 4);
+    Relax(g2, nd.x, nd.y, wp, 5);
+  }
+  return ret;
+}
+
+void Allowed(void* buf, int kind, bool rotate, int limit, void* ret_buf,
+             int len, void* dir_buf, int len_dir) {
+  Row* input = (Row*)buf;
+  Vis vis = GetVis(input, kind), dir;
+  if (vis[0][0+1][5+1] != -1) {
+    if (dir_buf) dir = Dijkstra(vis);
+    DFS(0, 0+1, 5+1, 0, limit, rotate, vis);
+  }
+  Table* ret = (Table*)ret_buf;
+  Table* ret_dir = (Table*)dir_buf;
+  for (int g = 0; g < (int)vis.size(); g++) {
     for (int x = 1; x <= kN; x++) {
       for (int y = 1; y <= kM; y++) {
-        ret[x - 1][y - 1] = vis[0][x + 1][y] == -1 && vis[0][x][y] != -1 &&
-                            vis[0][x][y] <= limit;
+        ret[g][x - 1][y - 1] = vis[g][x + 1][y] == -1 && vis[g][x][y] != -1 &&
+                               vis[g][x][y] <= limit;
+        if (ret_dir) ret_dir[g][x - 1][y - 1] = dir[g][x][y];
       }
     }
-    for (int i = kN * kM * sizeof(Entry); i < len; i++) {
-      ((uint8_t*)ret_buf)[i] = 0;
+  }
+  for (int i = kN * kM * vis.size() * sizeof(Entry); i < len; i++) {
+    ((uint8_t*)ret_buf)[i] = 0;
+  }
+  if (dir_buf) {
+    for (int i = kN * kM * vis.size() * sizeof(Entry); i < len_dir; i++) {
+      ((uint8_t*)dir_buf)[i] = 0;
     }
   }
 }
@@ -131,6 +170,25 @@ int Remove(void* buf) {
     for (int y = 0; y < kM; y++) input[j][y] = 0;
   }
   return ans;
+}
+
+std::vector<std::pair<int, int>> Moves(const void* buf, int tot, int g, int x,
+                                       int y) {
+  std::vector<std::pair<int, int>> ret;
+  const Table* dir = (const Table*)buf;
+  while (dir[g][x][y]) {
+    if (dir[g][x][y] != 1) ret.push_back({x, dir[g][x][y]});
+    switch (dir[g][x][y]) {
+      case 1: x--; break;
+      case 2: y++; break;
+      case 3: y--; break;
+      case 4: g = g == 0 ? tot - 1 : g - 1; break;
+      case 5: g = g == tot - 1 ? 0 : g + 1; break;
+      default: x = y = 0;
+    }
+  }
+  std::reverse(ret.begin(), ret.end());
+  return ret;
 }
 
 } // namespace internal
@@ -180,20 +238,22 @@ int main() {
 #else
 
 static PyObject* Allowed(PyObject *self, PyObject *args) {
-  Py_buffer buf, ret_buf;
+  Py_buffer buf, ret_buf, dir_buf{};
   int rotate, kind, limit;
   // input(int, 20*10), kind(int), rotate(bool), limit(int), ret(int, 4*20*10 or 20*10(rotate))
-  if (!PyArg_ParseTuple(args, "w*ipiw*", &buf, &kind, &rotate, &limit, &ret_buf)) {
+  if (!PyArg_ParseTuple(args, "w*ipiw*|w*", &buf, &kind, &rotate, &limit, &ret_buf, &dir_buf)) {
     return nullptr;
   }
+  long ret_len = kM * kN * sizeof(Entry) * (rotate ? kBlocks[kind].size() : 1);
   if (buf.len < (long)(kM * kN * sizeof(Entry)) ||
-      ret_buf.len < (long)(kM * kN * sizeof(Entry) * (rotate ? kBlocks[kind].size() : 1))) {
+      ret_buf.len < ret_len || (dir_buf.buf && dir_buf.len < ret_len)) {
     PyErr_SetString(PyExc_ValueError, "incorrect buffer length");
     PyBuffer_Release(&buf);
     PyBuffer_Release(&ret_buf);
     return nullptr;
   }
-  internal::Allowed(buf.buf, kind, rotate, limit, ret_buf.buf, ret_buf.len);
+  internal::Allowed(buf.buf, kind, rotate, limit, ret_buf.buf, ret_buf.len,
+                    dir_buf.buf, dir_buf.len);
   PyBuffer_Release(&buf);
   PyBuffer_Release(&ret_buf);
   Py_RETURN_NONE;
@@ -227,10 +287,30 @@ static PyObject* Remove(PyObject *self, PyObject *args) {
   return PyLong_FromLong(x);
 }
 
+static PyObject* Moves(PyObject *self, PyObject *args) {
+  Py_buffer buf;
+  int kind, rotate, g, x, y;
+  // input(int, 20*10), kind(int), rotate(bool), g(int), x(int), y(int)
+  if (!PyArg_ParseTuple(args, "w*iiiii", &buf, &kind, &rotate, &g, &x, &y)) {
+    return nullptr;
+  }
+  std::vector<std::pair<int, int>> trace =
+      internal::Moves(buf.buf, rotate ? kBlocks[kind].size() : 1, g, x, y);
+  PyBuffer_Release(&buf);
+  PyObject* ret = PyList_New(trace.size());
+  for (size_t i = 0; i < trace.size(); i++) {
+    PyObject* item = PyTuple_Pack(2, PyLong_FromLong(trace[i].first),
+                                  PyLong_FromLong(trace[i].second));
+    PyList_SetItem(ret, i, item);
+  }
+  return ret;
+}
+
 static PyMethodDef methods[] = {
   {"Allowed", Allowed, METH_VARARGS, ""},
   {"Place", Place, METH_VARARGS, ""},
   {"Remove", Remove, METH_VARARGS, ""},
+  {"Moves", Moves, METH_VARARGS, ""},
   {NULL, NULL, 0, NULL}
 };
 static PyModuleDef mod = {
