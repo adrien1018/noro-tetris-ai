@@ -91,14 +91,26 @@ from game import kH, kW
 import tetris
 import tetris.Tetris_Internal
 
-def PrintMoves(m):
+def GetMovesString(m):
+    ret = '---' if len(m) == 0 or m[0][0] != 0 else ''
     lst = []
     for i, j in m:
         if len(lst) == 0 or lst[-1][0] != i: lst.append((i, []))
         lst[-1][1].append('.DLRAB'[j])
-    print(' '.join(['{}:'.format(i) + ''.join(j) for i, j in lst]))
+    ret += ' '.join(['{}:'.format(i) + ''.join(j) for i, j in lst])
+    return ret
 
-def PrintStrat(model, board, now, nxt, score):
+kTransition = [
+    [1, 5, 6, 5, 5, 5, 5],
+    [6, 1, 5, 5, 5, 5, 5],
+    [5, 6, 1, 5, 5, 5, 5],
+    [5, 5, 5, 2, 5, 5, 5],
+    [5, 5, 5, 5, 2, 5, 5],
+    [6, 5, 5, 5, 5, 1, 5],
+    [5, 5, 5, 5, 6, 5, 1],
+]
+
+def PrintStrat(model, board, now, nxt, score, tx = None, ty = None):
     obs = np.zeros((3, kH, kW), dtype = 'uint8')
     obs[0] = 1 - board
     obs[1], t_dir = tetris.GetAllowed(board, now, False, 9, True)
@@ -110,10 +122,49 @@ def PrintStrat(model, board, now, nxt, score):
         act = torch.argmax(pi.probs, 1).item()
         x, y = act // kW, act % kW
     s = board.astype('int32')
-    tetris.Tetris_Internal.Place(s.data, now, 0, x, y, 2, True)
+    tetris.Tetris_Internal.Place(s.data, now, 0, x, y, 2, False)
     print(s)
-    PrintMoves(tetris.Tetris_Internal.Moves(t_dir, now, False, 0, x, y))
+    print(GetMovesString(tetris.Tetris_Internal.Moves(t_dir, now, False, 0, x, y)))
     sys.stdout.flush()
+
+    fx, fy = None, None
+    pos = [(x, y)]
+    if tx is not None: pos.append((tx, ty))
+    cols = []
+    for rx, ry in pos:
+        s = board.astype('int32')
+        dscore = score + tetris.Tetris_Internal.Place(s.data, now, 0, rx, ry, 1, True)
+        obs = np.zeros((3, kH, kW), dtype = 'uint8')
+        obs[0] = 1 - s
+        obs[1], t_dir = tetris.GetAllowed(s, nxt, False, 9, True)
+        obs[2,0,0] = nxt
+        obs[2,0,2] = dscore
+        obs = np.tile(obs, (7, 1, 1, 1))
+        for i in range(7): obs[i,2,0,1] = i
+        with torch.no_grad():
+            pi = model(obs_to_torch(obs))[0]
+            act = torch.argmax(pi.probs, 1).cpu().numpy()
+            gx, gy = act // kW, act % kW
+        mp = {}
+        for i in range(7):
+            r = (gx[i], gy[i])
+            if r not in mp: mp[r] = 0
+            mp[r] += kTransition[nxt][i]
+        mp = sorted(mp.items(), key = lambda x: -x[1])
+        arr = []
+        for r, prob in mp:
+            moves = GetMovesString(tetris.Tetris_Internal.Moves(t_dir, nxt, False, 0, r[0], r[1]))
+            arr.append('[next] %2d/32 -> %s' % (prob, moves))
+        cols.append(arr)
+        if fx is None:
+            fx, fy = mp[0][0]
+            print(fx, fy)
+    if len(cols) == 1: cols.append([])
+    while len(cols[0]) < len(cols[1]): cols[0].append('')
+    while len(cols[1]) < len(cols[0]): cols[1].append('')
+    for i in zip(*cols): print('%-35s%s' % i)
+    sys.stdout.flush()
+    return fx, fy
 
 def Loop(model):
     print('Ready', flush = True)
@@ -131,7 +182,7 @@ def Loop(model):
     nxt = cap.GetNext()
     assert (board[0:2,3:7] - Capture.kBlocks[now]).min() == 0
     board[0:2,3:7] -= Capture.kBlocks[now]
-    PrintStrat(model, board, now, nxt, 0)
+    x, y = PrintStrat(model, board, now, nxt, 0)
     prev = cap.arr[176:384,128:144]
     N = 0
     while True:
@@ -146,7 +197,7 @@ def Loop(model):
         assert (board[0:2,3:7] - Capture.kBlocks[now]).min() == 0
         board[0:2,3:7] -= Capture.kBlocks[now]
         score = (N * 4 - board.sum()) // 10
-        PrintStrat(model, board, now, nxt, score)
+        x, y = PrintStrat(model, board, now, nxt, score, x, y)
         prev = arr[176:384,128:144]
 
 if __name__ == "__main__":
@@ -157,3 +208,4 @@ if __name__ == "__main__":
     model.eval()
     while True:
         Loop(model)
+

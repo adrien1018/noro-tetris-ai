@@ -31,7 +31,7 @@ def PrintStrat(game):
     tetris.Tetris_Internal.Place(board.data, game.env.cur, 0, x, y, 2)
     t0 = kStr[0][game.env.cur] + '|' + kStr[0][game.env.nxt]
     t1 = kStr[1][game.env.cur] + '|' + kStr[1][game.env.nxt]
-    Print(board, t0 + '\n' + t1)
+    Print(board, t0 + '\n' + t1, game.score)
     return x, y
 
 if __name__ == "__main__":
@@ -41,12 +41,13 @@ if __name__ == "__main__":
     else: model.load_state_dict(torch.load(sys.argv[1]))
     model.eval()
     for i in range(1000):
-        game = Game(random.randint(0, 10000000))
+        seed = random.randint(0, 2**32-1)
+        game = Game(seed)
         while True:
             _, _, x, y = game.step(GetStrat(game))
             if x: break
-        if y['score'] < 25: continue
-        game = Game(i)
+        if y['score'] < 35: continue
+        game = Game(seed)
         while True:
             x, y = PrintStrat(game)
             if game.step((x, y))[2]: break

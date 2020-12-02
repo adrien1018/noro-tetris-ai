@@ -5,9 +5,10 @@ import numpy as np, torch, sys, random
 from game import Game, kW
 from model import Model, ConvBlock, obs_to_torch
 from config import Configs
+from collections import Counter
 
 device = torch.device('cuda')
-kEnvs = 2048
+kEnvs = 10000
 
 if __name__ == "__main__":
     start_seed = int(sys.argv[2]) if len(sys.argv) > 2 else 2234
@@ -35,9 +36,6 @@ if __name__ == "__main__":
             if over:
                 score[i] = info['score']
                 finished[i] = True
-    score = [(i, j) for j, i in enumerate(score)]
-    score.sort()
-    ds = [0, 0.01, 0.05] + [i * 0.1 for i in range(1, 10)] + [0.95, 0.99, 1 - 1e-5]
-    print(' '.join(['%5.2f' % i for i in ds]))
-    print(' '.join(['%5.1f' % score[int(i * kEnvs)][0] for i in ds]))
-    print('>35:', len([0 for i in score if i[0] > 35]))
+    score = sorted(list(dict(Counter(score)).items()))
+    for i, j in score: print(i, j)
+    #score = [(i, j) for j, i in enumerate(score)]
