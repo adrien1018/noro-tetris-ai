@@ -7,7 +7,7 @@ from game import Game, kW, kTensorDim
 from model import Model, ConvBlock, obs_to_torch
 from config import Configs
 
-device = torch.device('cuda')
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 def GetTorch(game):
     return obs_to_torch(game.obs).unsqueeze(0)

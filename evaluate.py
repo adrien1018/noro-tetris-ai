@@ -7,7 +7,7 @@ from model import Model, ConvBlock, obs_to_torch
 from config import Configs
 from collections import Counter
 
-device = torch.device('cuda')
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 kEnvs = 10000
 
 if __name__ == "__main__":

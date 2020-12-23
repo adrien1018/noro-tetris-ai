@@ -15,7 +15,7 @@ from game import Game, Worker, kTensorDim
 from model import Model, ConvBlock, obs_to_torch
 from config import Configs
 
-device = torch.device('cuda')
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 class SortedQueue:
     def __init__(self, sz):
