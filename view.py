@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-import numpy as np, torch, sys, random, time
+import numpy as np, torch, sys, random, time, os.path
 import tetris
 
 from game import Game, kW, kTensorDim
@@ -37,7 +37,7 @@ def PrintStrat(game):
 if __name__ == "__main__":
     c = Configs()
     model = Model(c.channels, c.blocks).to(device)
-    model_path = 'models/model.pth' if len(sys.argv) <= 1 else sys.argv[1]
+    model_path = os.path.join(os.path.dirname(sys.argv[0]), 'models/model.pth') if len(sys.argv) <= 1 else sys.argv[1]
     if model_path[-3:] == 'pkl': model.load_state_dict(torch.load(model_path)[0].state_dict())
     else: model.load_state_dict(torch.load(model_path))
     model.eval()

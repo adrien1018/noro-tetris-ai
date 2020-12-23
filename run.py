@@ -86,7 +86,7 @@ class Capture:
         [[1, 1, 1, 1], [0, 0, 0, 0]]
     ])
 
-import sys, torch
+import sys, torch, os
 from model import Model, ConvBlock, obs_to_torch
 from config import Configs
 from game import kH, kW
@@ -205,7 +205,7 @@ def Loop(model):
 if __name__ == "__main__":
     c = Configs()
     model = Model(c.channels, c.blocks).cuda()
-    model_path = 'models/model.pth' if len(sys.argv) <= 1 else sys.argv[1]
+    model_path = os.path.join(os.path.dirname(sys.argv[0]), 'models/model.pth') if len(sys.argv) <= 1 else sys.argv[1]
     if model_path[-3:] == 'pkl': model.load_state_dict(torch.load(model_path)[0].state_dict())
     else: model.load_state_dict(torch.load(model_path))
     model.eval()

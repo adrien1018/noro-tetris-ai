@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-import numpy as np, torch, sys, random
+import numpy as np, torch, sys, random, os
 
 from game import Game, kW
 from model import Model, ConvBlock, obs_to_torch
@@ -21,7 +21,7 @@ if __name__ == "__main__":
     c = Configs()
     model = Model(c.channels, c.blocks).to(device)
 
-    model_path = sys.argv[1] if file_given else 'models/model.pth'
+    model_path = sys.argv[1] if file_given else os.path.join(os.path.dirname(sys.argv[0]), 'models/model.pth')
     if model_path[-3:] == 'pkl': model.load_state_dict(torch.load(model_path)[0].state_dict())
     else: model.load_state_dict(torch.load(model_path))
     model.eval()
