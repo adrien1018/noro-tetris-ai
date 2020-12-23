@@ -23,7 +23,7 @@ pip install -r requirements.txt
 Open FCEUX and load the ROM first, and adjust the screen size to 512 x 448 (the second smallest size). **Before** entering the main game screen, run:
 
 ```
-./run.py models/model.pth
+./run.py
 ```
 
 After the program outputs `Ready`, start the game. The program will capture the FCEUX screen continually to parse the game state, and outputs something like this after any piece is spawned:
@@ -83,7 +83,7 @@ The main training code is modified from [vpj/rl_samples](https://github.com/vpj/
 ### Evaluating
 
 ```
-./evaluate.py models/model.pth [seed]
+./evaluate.py [seed]
 ```
 
 The program plays 10000 games using the trained model and outputs the scoring distribution. The format of each line of output is `[lines] [number of games]`.
@@ -107,7 +107,7 @@ The table below shows the approximated cumulative distribution of lines:
 ### Examining the policy
 
 ```
-./view.py models/model.pth [seed]
+./view.py
 ```
 
 The program will simulate a game, and display the following information alternately each time you hit the Enter key:

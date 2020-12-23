@@ -11,11 +11,19 @@ device = torch.device('cuda')
 kEnvs = 10000
 
 if __name__ == "__main__":
-    start_seed = int(sys.argv[2]) if len(sys.argv) > 2 else 2234
+    try:
+        start_seed = int(sys.argv[-1]) if len(sys.argv) >= 2 else 2234
+        file_given = len(sys.argv) >= 3
+    except ValueError:
+        start_seed = 2234
+        file_given = True
+
     c = Configs()
     model = Model(c.channels, c.blocks).to(device)
-    if sys.argv[1][-3:] == 'pkl': model.load_state_dict(torch.load(sys.argv[1])[0].state_dict())
-    else: model.load_state_dict(torch.load(sys.argv[1]))
+
+    model_path = sys.argv[1] if file_given else 'models/model.pth'
+    if model_path[-3:] == 'pkl': model.load_state_dict(torch.load(model_path)[0].state_dict())
+    else: model.load_state_dict(torch.load(model_path))
     model.eval()
     envs = [Game(i + start_seed) for i in range(kEnvs)]
     finished = [False for i in range(kEnvs)]

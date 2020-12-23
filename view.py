@@ -37,8 +37,9 @@ def PrintStrat(game):
 if __name__ == "__main__":
     c = Configs()
     model = Model(c.channels, c.blocks).to(device)
-    if sys.argv[1][-3:] == 'pkl': model.load_state_dict(torch.load(sys.argv[1])[0].state_dict())
-    else: model.load_state_dict(torch.load(sys.argv[1]))
+    model_path = 'models/model.pth' if len(sys.argv) <= 1 else sys.argv[1]
+    if model_path[-3:] == 'pkl': model.load_state_dict(torch.load(model_path)[0].state_dict())
+    else: model.load_state_dict(torch.load(model_path))
     model.eval()
     while True:
         seed = random.randint(0, 2**32-1)
