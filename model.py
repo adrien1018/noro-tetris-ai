@@ -6,7 +6,8 @@ from torch.cuda.amp import autocast
 from game import kH, kW
 
 # board, valid, current(7), next(7), score
-kInChannel = 1 + 1 + 7 + 7 + 1
+#kInChannel = 1 + 1 + 7 + 7 + 1
+kInChannel = 1 + 1 + 7 + 7 * 5 + 7 + 1
 
 class ConvBlock(nn.Module):
     def __init__(self, ch):
@@ -52,9 +53,9 @@ class Model(nn.Module):
     def forward(self, obs: torch.Tensor):
         q = torch.zeros((obs.shape[0], kInChannel, kH, kW), dtype = torch.float32, device = obs.device)
         q[:,0:2] = obs[:,0:2]
-        q.scatter_(1, (2 + obs[:,2,0,0].type(torch.long)).view(-1, 1, 1, 1).repeat(1, 1, kH, kW), 1)
-        q.scatter_(1, (9 + obs[:,2,0,1].type(torch.long)).view(-1, 1, 1, 1).repeat(1, 1, kH, kW), 1)
-        q[:,16] = (obs[:,2,0,2] / 32).view(-1, 1, 1)
+        for i in range(7):
+            q.scatter_(1, (2 + i*7 + obs[:,2,0,i].type(torch.long)).view(-1, 1, 1, 1).repeat(1, 1, kH, kW), 1)
+        q[:,51] = (obs[:,2,0,7] / 32).view(-1, 1, 1)
         x = self.start(q)
         x = self.res(x)
         pi = self.pi_logits_head(x)

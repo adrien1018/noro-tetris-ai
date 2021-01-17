@@ -5,8 +5,8 @@
 #include <vector>
 #include <utility>
 #include <algorithm>
-#if __has_include(<python3.8/Python.h>)
-#include <python3.8/Python.h>
+#if __has_include(<python3.9/Python.h>)
+#include <python3.9/Python.h>
 #else
 #include <Python.h>
 #endif
@@ -15,6 +15,26 @@ using Entry = int32_t;
 using Poly = std::array<std::pair<int, int>, 4>;
 const int kN = 20, kM = 10;
 const std::vector<Poly> kBlocks[] = {
+    {{{{0, -1}, {0, 0}, {0, 1}, {-1, 0}}}, // T
+     {{{1, 0}, {0, 0}, {0, 1}, {-1, 0}}},
+     {{{1, 0}, {0, 0}, {0, 1}, {0, -1}}},
+     {{{1, 0}, {0, 0}, {-1, 0}, {0, -1}}}},
+    {{{{-1, -1}, {0, -1}, {0, 0}, {0, 1}}}, // J
+     {{{-1, 0}, {-1, 1}, {0, 0}, {1, 0}}},
+     {{{0, -1}, {0, 0}, {0, 1}, {1, 1}}},
+     {{{-1, 0}, {0, 0}, {1, -1}, {1, 0}}}},
+    {{{{0, -1}, {0, 0}, {1, 0}, {1, 1}}}, // Z
+     {{{-1, 1}, {0, 0}, {0, 1}, {1, 0}}}},
+    {{{{0, 1}, {0, 0}, {1, 1}, {1, 0}}}}, // O
+    {{{{0, 0}, {0, 1}, {1, -1}, {1, 0}}}, // S
+     {{{-1, 0}, {0, 0}, {0, 1}, {1, 1}}}},
+    {{{{-1, 1}, {0, -1}, {0, 0}, {0, 1}}}, // L
+     {{{-1, 0}, {0, 0}, {1, 0}, {1, 1}}},
+     {{{0, -1}, {0, 0}, {0, 1}, {1, -1}}},
+     {{{-1, -1}, {-1, 0}, {0, 0}, {1, 0}}}},
+    {{{{0, -1}, {0, 0}, {0, 1}, {0, 2}}}, // I
+     {{{-2, 0}, {-1, 0}, {0, 0}, {1, 0}}}}};
+/*const std::vector<Poly> kBlocks[] = {
     {{{{1, 0}, {0, 0}, {0, 1}, {0, -1}}}, // T
      {{{1, 0}, {0, 0}, {-1, 0}, {0, -1}}},
      {{{0, -1}, {0, 0}, {0, 1}, {-1, 0}}},
@@ -33,7 +53,7 @@ const std::vector<Poly> kBlocks[] = {
      {{{-1, 1}, {0, -1}, {0, 0}, {0, 1}}},
      {{{-1, 0}, {0, 0}, {1, 0}, {1, 1}}}},
     {{{{0, -2}, {0, -1}, {0, 0}, {0, 1}}}, // I
-     {{{-2, 0}, {-1, 0}, {0, 0}, {1, 0}}}}};
+     {{{-2, 0}, {-1, 0}, {0, 0}, {1, 0}}}}};*/
 
 namespace internal {
 
@@ -87,14 +107,16 @@ struct Node {
   bool operator<(const Node& a) const { return w > a.w; }
 };
 
+constexpr int kStartY = 4; // 5
+
 Vis Dijkstra(const Vis& v, bool rotate) {
   Vis ret(v.size(), decltype(v[0]){});
-  if (v[0][0+1][5+1] < 0) return ret;
+  if (v[0][0+1][kStartY+1] < 0) return ret;
   std::vector<std::array<std::array<Weight, kM + 2>, kN + 2>> d(v.size());
   for (auto& i : d) for (auto& j : i) for (auto& k : j) k = {127, 0};
   std::priority_queue<Node> pq;
-  pq.push({0, 0+1, 5+1, 0, {0, 0}});
-  d[0][0+1][5+1] = {0, 0};
+  pq.push({0, 0+1, kStartY+1, 0, {0, 0}});
+  d[0][0+1][kStartY+1] = {0, 0};
   while (!pq.empty()) {
     Node nd = pq.top();
     pq.pop();
@@ -126,7 +148,7 @@ void Allowed(void* buf, int kind, bool rotate, int limit, void* ret_buf,
   Vis vis = GetVis(input, kind);
   Vis dir;
   if (dir_buf) dir = Dijkstra(vis, rotate);
-  if (vis[0][0+1][5+1] != -1) DFS(0, 0+1, 5+1, 0, limit, rotate, vis);
+  if (vis[0][0+1][kStartY+1] != -1) DFS(0, 0+1, kStartY+1, 0, limit, rotate, vis);
   Table* ret = (Table*)ret_buf;
   Table* ret_dir = (Table*)dir_buf;
   int G = rotate ? vis.size() : 1;
@@ -213,7 +235,7 @@ int main() {
     int a[20][10]{}, b[4][20][10]{}, c[4][20][10]{};
     for (;; cnt++) {
       int k = mrand(0, 6)(gen);
-      internal::Allowed((void*)a, k, true, 8, (void*)b, sizeof(b), (void*)c, sizeof(c));
+      internal::Allowed((void*)a, k, false, 8, (void*)b, sizeof(b), (void*)c, sizeof(c));
       int sum = 0;
       for (int i = 0; i < 4; i++) for (int j = 0; j < 20; j++) for (int k = 0; k < 10; k++) sum += b[i][j][k];
       if (!sum) break;
@@ -225,9 +247,9 @@ int main() {
           cnt += b[i][j][k];
         }
       }
-      internal::Place((void*)a, k, d, x, y, 1);
+      internal::Place((void*)a, k, d, x, y, cnt%9+1);
       assert(internal::Moves(c, kBlocks[k].size(), d, x, y).size() < 100);
-      /*for (int j = 0; j < 20; j++) {
+      for (int j = 0; j < 20; j++) {
         for (int k = 0; k < 10; k++) printf("%d ", a[j][k]);
         printf("||");
         for (int i = 0; i < 4; i++) {
@@ -236,7 +258,7 @@ int main() {
         }
         puts("");
       }
-      puts(""); sleep(1);*/
+      puts(""); sleep(1);
       internal::Remove((void*)a);
     }
   }

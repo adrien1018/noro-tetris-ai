@@ -9,13 +9,13 @@ kMaxFail = 3
 
 def CalReward(success, score, new_score):
     if not success: return -0.125
-    #return (score + new_score) ** 2 - score ** 2
-    ret = 0
-    for i in range(new_score):
-        if score + i < 30: ret += 0.5
-        elif score + i < 35: ret += 3
-        else: ret += 8
-    return ret
+    #ret = 0
+    #for i in range(new_score):
+    #    if score + i < 30: ret += 0.5
+    #    elif score + i < 35: ret += 3
+    #    else: ret += 8
+    #return ret
+    return new_score
 
 class Game:
     def __init__(self, seed: int, tpow = 1):
@@ -38,8 +38,11 @@ class Game:
         self.obs[0] = 1 - self.env.board
         self.obs[1] = self.env.allowed[0]
         self.obs[2,0,0] = self.env.cur
-        self.obs[2,0,1] = self.env.nxt
-        self.obs[2,0,2] = self.score
+        #self.obs[2,0,1] = self.env.nxt
+        #self.obs[2,0,2] = self.score
+        self.obs[2,0,1:6] = [self.env.queue[i] for i in range(5)] #
+        self.obs[2,0,6] = self.env.steps % 7 #
+        self.obs[2,0,7] = self.score #
 
     def step(self, action, **kwargs):
         """
