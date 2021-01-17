@@ -42,14 +42,20 @@ class Game:
         #self.obs[2,0,2] = self.score
         self.obs[2,0,1:6] = [self.env.queue[i] for i in range(5)] #
         self.obs[2,0,6] = self.env.steps % 7 #
-        self.obs[2,0,7] = self.score #
+        self.obs[2,0,7] = 7 if self.env.hold is None else self.env.hold
+        self.obs[2,0,8] = int(self.env.holded)
+        self.obs[2,0,9] = self.score #
 
     def step(self, action, **kwargs):
         """
-        Executes `action` (x, y)
+        Executes `action`
          returns a tuple of (observation, reward, done, info).
         """
-        suc, score, _ = self.env.Place(*action, **kwargs)
+        if action >= kW * kH:
+            suc, score, _ = self.env.Hold()
+        else:
+            x, y = action // kW, action % kW
+            suc, score, _ = self.env.Place(x, y, **kwargs)
         reward = CalReward(suc, self.score, score)
         if suc: self.score += score
         self.reward += reward
@@ -87,7 +93,7 @@ def worker_process(remote: multiprocessing.connection.Connection, seed: int, num
         result = []
         cmd, data = remote.recv()
         if cmd == "step":
-            for i in range(num): result.append(games[i].step((data[i] // kW, data[i] % kW)))
+            for i in range(num): result.append(games[i].step(data[i]))
             obs, rew, over, info = zip(*result)
             remote.send((np.stack(obs), np.stack(rew), np.array(over), list(info)))
         elif cmd == "reset":

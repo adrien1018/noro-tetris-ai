@@ -45,6 +45,8 @@ class Tetris:
         self.steps = 0
         self.queue = deque() #
         self.cur = self._QueueStep() #
+        self.hold = None
+        self.holded = False
         #self.cur = GetRand(self.random) if cur is None else cur
         #self.nxt = GetRand(self.random, self.cur) if nxt is None else nxt
         self.lines = 0
@@ -52,6 +54,16 @@ class Tetris:
         self.rotate = rotate
         self._SetInternal()
         self.over = False
+
+    def Hold(self):
+        if self.holded: return False, None, None
+        if self.hold is None:
+            self.hold = self.cur
+            self.cur = self._QueueStep()
+        else:
+            self.hold, self.cur = self.cur, self.hold
+        self.holded = True
+        return True, 0, 0
 
     def Seed(self, seed):
         self.random.seed(seed)
@@ -76,6 +88,7 @@ class Tetris:
         num = Place(self.board.data, self.cur, g, x, y, 1, True)
         self.lines += num
         self.steps += 1
+        self.holded = False
         self.cur = self._QueueStep() #
         #self.cur, self.nxt = self.nxt, (GetRand(self.random, self.nxt) if t_nxt is None else t_nxt)
         self._SetInternal()
