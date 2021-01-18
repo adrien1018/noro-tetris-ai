@@ -63,6 +63,7 @@ class Tetris:
             self.cur = self._QueueStep()
         else:
             self.hold, self.cur = self.cur, self.hold
+        self._SetInternal()
         self.holded = True
         return True, 0, 0
 
