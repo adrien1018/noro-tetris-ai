@@ -9,13 +9,12 @@ kMaxFail = 3
 
 def CalReward(success, score, new_score):
     if not success: return -0.125
-    #ret = 0
-    #for i in range(new_score):
-    #    if score + i < 30: ret += 0.5
-    #    elif score + i < 35: ret += 3
-    #    else: ret += 8
-    #return ret
-    return new_score
+    ret = 0
+    for i in range(new_score):
+        if score + i < 105: ret += 0.5
+        elif score + i < 120: ret += 3
+        else: ret += 8
+    return ret
 
 class Game:
     def __init__(self, seed: int, tpow = 1):
