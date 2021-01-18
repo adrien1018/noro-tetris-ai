@@ -3,7 +3,7 @@
 import numpy as np, torch, sys, random, time, os.path
 import tetris
 
-from game import Game, kW, kTensorDim
+from game import Game, kH, kW, kTensorDim
 from model import Model, ConvBlock, obs_to_torch
 from config import Configs
 
@@ -15,7 +15,7 @@ def GetTorch(game):
 def Print(board, *args):
     print(*args)
     input()
-    print('\n'.join([' '.join([str(board[i,j]) for j in range(10)]) for i in range(20)]))
+    print('\n'.join([' '.join([str(board[i,j]) for j in range(kW)]) for i in range(kH)]))
 
 def GetStrat(game):
     with torch.no_grad():

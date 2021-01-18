@@ -7,9 +7,10 @@ kLimits = [9, 8, 7, 6, 5, 4, 3, 3, 2, 2, 2, 2, 2]
 kSpeed = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 10, 11, 11, 11, 12, 12, 12,
           13, 13, 13, 13, 13, 13, 13, 13, 13, 13]
 kScore = [0, 40, 100, 300, 1200]
+kH, kW = 21, 10
 
 def GetAllowed(board, k, rot, lim, with_dir = False):
-    ret = np.zeros((4 if rot else 1, 20, 10), dtype = 'int32')
+    ret = np.zeros((4 if rot else 1, kH, kW), dtype = 'int32')
     if with_dir:
         ret_dir = np.zeros_like(ret)
         Allowed(board.data, k, rot, lim, ret.data, ret_dir.data)
@@ -41,7 +42,7 @@ class Tetris:
         return self.queue.popleft()
 
     def Reset(self, start = 0, rotate = True, cur = None, nxt = None):
-        self.board = np.zeros((20, 10), dtype = 'int32')
+        self.board = np.zeros((kH, kW), dtype = 'int32')
         self.steps = 0
         self.queue = deque() #
         self.cur = self._QueueStep() #

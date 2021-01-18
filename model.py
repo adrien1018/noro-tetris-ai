@@ -39,7 +39,7 @@ class Model(nn.Module):
                 nn.BatchNorm2d(4),
                 nn.Flatten(),
                 nn.ReLU(True),
-                nn.Linear(4 * kH * kW, kH * kW + 1 + 3) # +1 for hold, +3 for padding
+                nn.Linear(4 * kH * kW, kH * kW + 1 + 1) # +1 for hold, +1 for padding
                 )
         self.value = nn.Sequential(
                 nn.Conv2d(ch, 1, 1),
@@ -63,7 +63,7 @@ class Model(nn.Module):
         x = self.res(x)
         pi = self.pi_logits_head(x)
 
-        mp = torch.zeros((obs.shape[0], kH * kW + 4), dtype = torch.float32, device = obs.device)
+        mp = torch.zeros(pi.shape, dtype = torch.float32, device = obs.device)
         mp[:,:kH*kW] = obs[:,1].view(-1, kH * kW)
         mp[:,kH*kW] = 1 - obs[:,2,0,8] # 1: holded, cannot hold again
         if self.training:

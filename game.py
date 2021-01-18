@@ -3,7 +3,7 @@ import numpy as np
 
 import tetris
 
-kH, kW = 20, 10
+kH, kW = 21, 10
 kTensorDim = (3, kH, kW)
 kMaxFail = 3
 
@@ -26,7 +26,7 @@ class Game:
         self.reset(False)
 
     def set_state(self, cur, nxt, board = None):
-        if board is None: board = np.zeros((20, 10), dtype = 'int32')
+        if board is None: board = np.zeros((kH, kW), dtype = 'int32')
         self.env.board = board.astype('int32')
         self.env.cur = cur
         self.env.nxt = nxt
