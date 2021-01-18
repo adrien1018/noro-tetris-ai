@@ -15,24 +15,32 @@ def GetTorch(game):
 def Print(board, *args):
     print(*args)
     input()
-    print('\n'.join([' '.join([str(board[i,j]) for j in range(kW)]) for i in range(kH)]))
+    if isinstance(board, str):
+        print(board)
+    else:
+        print('\n'.join([' '.join([str(board[i,j]) for j in range(kW)]) for i in range(1,kH)]))
 
 def GetStrat(game):
     with torch.no_grad():
         pi = model(GetTorch(game))[0]
         act = torch.argmax(pi.probs, 1).item()
-        return act // kW, act % kW
+        return act
 
-kStr = [['# # #  ', '# # #  ', '# #    ', '  # #  ', '  # #  ', '# # #  ', '# # # #'],
-        ['  #    ', '    #  ', '  # #  ', '  # #  ', '# #    ', '#      ', '       ']]
+kStr = [['  #    ', '#      ', '# #    ', '  # #  ', '  # #  ', '    #  ', '# # # #'],
+        ['# # #  ', '# # #  ', '  # #  ', '  # #  ', '# #    ', '# # #  ', '       ']]
+def GetLine(game, l):
+    return '|'.join([kStr[l][i] for i in [game.env.cur] + list(game.env.queue)[:5]]) \
+            + ('||' + kStr[l][game.env.hold] if game.env.hold is not None else '')
 def PrintStrat(game):
-    x, y = GetStrat(game)
-    board = np.array(game.env.board)
-    tetris.Tetris_Internal.Place(board.data, game.env.cur, 0, x, y, 2)
-    t0 = kStr[0][game.env.cur] + '|' + kStr[0][game.env.nxt]
-    t1 = kStr[1][game.env.cur] + '|' + kStr[1][game.env.nxt]
-    Print(board, t0 + '\n' + t1, game.score)
-    return x, y
+    act = GetStrat(game)
+    if act >= kW * kH:
+        board = 'Hold'
+    else:
+        board = np.array(game.env.board)
+        tetris.Tetris_Internal.Place(board.data, game.env.cur, 0, act // kW, act % kW, 2)
+    Print(board, GetLine(game, 0) + '\n' + GetLine(game, 1), game.score)
+    print(act // kW, act % kW)
+    return act
 
 if __name__ == "__main__":
     c = Configs()
@@ -50,6 +58,6 @@ if __name__ == "__main__":
         if y['score'] < 1: continue
         game = Game(seed)
         while True:
-            x, y = PrintStrat(game)
-            if game.step((x, y))[2]: break
+            act = PrintStrat(game)
+            if game.step(act)[2]: break
             input()
