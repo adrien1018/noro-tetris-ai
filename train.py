@@ -84,10 +84,11 @@ class Main:
                 a = pi.sample()
                 actions[:, t] = a
                 log_pis[:, t] = pi.log_prob(a)
+                actions_cpu = a.cpu().numpy()
 
             # run sampled actions on each worker
             for w, worker in enumerate(self.workers):
-                worker.child.send(("step", actions[self.w_range(w),t].cpu().numpy()))
+                worker.child.send(("step", actions_cpu[self.w_range(w)]))
 
             self.obs = np.zeros((self.envs, *kTensorDim))
             for w, worker in enumerate(self.workers):
