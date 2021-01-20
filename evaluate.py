@@ -8,7 +8,7 @@ from config import Configs
 from collections import Counter
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-kEnvs = 10000
+kEnvs = 1000
 
 if __name__ == "__main__":
     try:
@@ -36,11 +36,10 @@ if __name__ == "__main__":
             pi = model(obs)[0]
             act = torch.argmax(pi.probs, 1).cpu().numpy()
             #act = pi.sample().cpu().numpy()
-        x, y = act // kW, act % kW
         tb = []
         for i in range(kEnvs):
             if finished[i]: continue
-            _, _, over, info = envs[i].step((x[i], y[i]))
+            _, _, over, info = envs[i].step(act[i])
             if over:
                 score[i] = info['score']
                 finished[i] = True

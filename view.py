@@ -33,13 +33,14 @@ def GetLine(game, l):
             + ('||' + kStr[l][game.env.hold] if game.env.hold is not None else '')
 def PrintStrat(game):
     act = GetStrat(game)
-    if act >= kW * kH:
-        board = 'Hold'
-    else:
-        board = np.array(game.env.board)
+    board = np.array(game.env.board)
+    if act < kW * kH:
         tetris.Tetris_Internal.Place(board.data, game.env.cur, 0, act // kW, act % kW, 2)
     Print(board, GetLine(game, 0) + '\n' + GetLine(game, 1), game.score)
-    print(act // kW, act % kW)
+    if act < kW * kH:
+        print(act // kW, act % kW)
+    else:
+        print('Hold')
     return act
 
 if __name__ == "__main__":
