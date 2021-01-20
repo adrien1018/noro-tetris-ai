@@ -234,6 +234,7 @@ class Main:
     def run_training_loop(self):
         """### Run training loop"""
         offset = tracker.get_global_step()
+        tracker.set_queue('score', 400, True)
         for _ in monit.loop(self.c.updates - offset):
             update = tracker.get_global_step()
             progress = update / self.c.updates
@@ -243,9 +244,8 @@ class Main:
             self.train(samples)
             # write summary info to the writer, and log to the screen
             tracker.save()
-            logger.log()
-            if (update + 1) % 500 == 0:
-                experiment.save_checkpoint()
+            if (update + 1) % 25 == 0: logger.log()
+            if (update + 1) % 500 == 0: experiment.save_checkpoint()
 
     def destroy(self):
         for worker in self.workers:
