@@ -187,7 +187,7 @@ class Main:
     def _calc_loss(self, samples: Dict[str, torch.Tensor], clip_range: float) -> torch.Tensor:
         """## PPO Loss"""
         # $R_t$ returns sampled from $\pi_{\theta_{OLD}}$
-        sampled_return = samples['values'] + samples['advantages']
+        sampled_return = (samples['values'] + samples['advantages']).float()
         sampled_normalized_advantage = self._normalize(samples['advantages'])
         # Sampled observations are fed into the model to get $\pi_\theta(a_t|s_t)$ and $V^{\pi_\theta}(s_t)$;
         pi, value = self.model(samples['obs'])
