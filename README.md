@@ -18,54 +18,15 @@ pip install -r requirements.txt
 
 ## Usage
 
-### Run the AI with FCEUX
+### Run the AI on Jstris
 
-Open FCEUX and load the ROM first, and adjust the screen size to 512 x 448 (the second smallest size). **Before** entering the main game screen, run:
+Open Jstris website, and fill in the screen coordinates of the playfield to the 8th and 10th line of `run.py`. After that, run
 
 ```
 ./run.py
 ```
 
-After the program outputs `Ready`, start the game. The program will capture the FCEUX screen continually to parse the game state, and outputs something like this after any piece is spawned:
-
-```
-[[0 0 0 0 0 0 0 0 0 0]
- [0 0 0 0 0 0 0 0 1 1]
- [0 0 1 1 1 1 1 1 1 1]
- [0 0 0 0 0 1 1 1 1 1]
- [0 0 0 0 0 0 0 1 1 1]
- [0 0 0 1 1 1 1 1 1 1]
- [0 0 0 1 1 1 1 1 1 1]
- [0 0 0 1 1 1 1 1 1 1]
- [2 2 0 1 1 1 1 1 1 1]
- [2 2 0 0 0 1 1 0 1 1]
- [1 1 1 0 1 1 1 1 1 0]
- [0 0 0 0 0 1 1 1 1 0]
- [0 1 0 0 1 1 1 1 0 1]
- [0 1 1 0 0 1 1 0 1 1]
- [1 1 0 1 1 1 1 1 1 1]
- [0 1 1 1 0 0 1 1 1 1]
- [0 0 1 1 1 1 1 1 1 1]
- [0 0 0 0 1 1 1 1 1 1]
- [0 0 0 1 1 1 1 1 1 1]
- [0 1 1 1 1 0 1 1 1 0]]
-0:LLLL
-8 1
-[next] 22/32 -> 0:L 3:LLL          [next] 27/32 -> 0:LLLL
-[next]  5/32 -> 0:RRRR             [next]  5/32 -> 0:LLLL 3:R
-[next]  5/32 -> 0:L 3:LL
-```
-
-- The first part indicates the current playfield (`0`/`1`) and the desired placement of the current piece (`2`).
-- After the playfield is a line indicating the input sequence to make the desired placement.
-    - Format: `[row number]:[L/Rs]`.
-    - Rows are numbered 0 to 19 from top to bottom.
-    - A prefix `---` indicates no input needed at the start of drop (0-th row).
-- The next line is the coordinate of the desired placement.
-- The next few lines are the input sequences corresponding to possible desired placements of the next piece.
-  - Format: `[probability] -> [input sequence]`.
-  - Use the first column if one places the current piece at the indicated position;
-    use the second column if one places the current piece by the highest probability placement before the next piece information is available (that is, the input sequence displayed at the first row of the first column when the previous piece is dropping).
+and then **immediately** switch to the Jstris window. The program will capture the game field and play the game automatically (by simulating keyboard inputs).
 
 ### Training a model
 
@@ -92,17 +53,17 @@ The table below shows the approximated cumulative distribution of lines:
 
 | Lines | Probability |
 | ----- | ----------- |
-| 5+    | 99.8%       |
-| 10+   | 97.7%       |
-| 15+   | 89.4%       |
-| 20+   | 71.6%       |
-| 25+   | 47.8%       |
-| 30+   | 26.3%       |
-| 35+   | 12.1%       |
-| 40+   | 4.6%        |
-| 45+   | 1.5%        |
-| 50+   | 0.4%        |
-| 55+   | 0.1%        |
+| 50+   | 97.3%       |
+| 75+   | 86.4%       |
+| 100+  | 69.5%       |
+| 125+  | 50.1%       |
+| 150+  | 33.0%       |
+| 175+  | 19.2%       |
+| 200+  | 9.6%        |
+| 225+  | 3.8%        |
+| 250+  | 1.1%        |
+| 275+  | 0.3%        |
+| 300+  | 0.1%        |
 
 ### Examining the policy
 
@@ -121,11 +82,14 @@ This can be useful to examine or learn the model's policy.
 
 ### Network architecture
 
-The input is a $20 \times 10 \times 17$ image stack comprising of 17 feature planes:
+The input is a $21 \times 10 \times 61$ image stack comprising of 61 feature planes:
 - 1 feature plane for the current playfield (1 if empty, 0 otherwise)
 - 1 feature plane for the valid placements (1 if valid, 0 otherwise)
 - One-hot encoding of the current piece (7 feature planes)
-- One-hot encoding of the next piece (7 feature planes)
+- One-hot encoding of each of the next 5 pieces (35 feature planes)
+- One-hot encoding of the current piece count modulo 7 (7 feature planes)
+- One-hot encoding of the holded piece (8 feature planes)
+- 1 feature plane for whether hold is used
 - 1 feature plane for the current score (divided by 32)
 
 The input features are processed by a single convolutional block followed by 8 residual blocks, all of them having 128 filters. The output of the residual tower is passed into two separate heads for computing the value and policy.
@@ -136,9 +100,9 @@ Rewards are given according to the table below:
 
 | Condition         | Reward       |
 | ----------------- | ------------ |
-| 0 - 29 lines      | 0.5 per line |
-| 30 - 34 lines     | 3 per line   |
-| 35+ lines         | 8 per line   |
+| 0 - 105 lines     | 0.5 per line |
+| 105 - 120 lines   | 3 per line   |
+| 120+ lines        | 8 per line   |
 | Invalid placement | -0.125 per placement<br>Game ends after 3 consecutive invalid placements |
 
 ### Training hyperparameters
@@ -147,8 +111,6 @@ The model in the repository is trained by the given default hyperparameters, exc
 
 | Iterations      | lr   | reg_l2 |
 | --------------- | ---- | ------ |
-| 0 - 45000       | 1e-4 | 2e-4   |
-| 45000 - 70000   | 1e-4 | 5e-5   |
-| 70000 - 90000   | 5e-5 | 0      |
-| 90000 - 110000  | 2e-5 | 0      |
-| 110000 - 130000 | 8e-6 | 0      |
+| 0 - 30000       | 1e-4 | 5e-5   |
+| 30000 - 50000   | 1e-5 | 0      |
+| 50000 - 65000   | 5e-6 | 0      |
