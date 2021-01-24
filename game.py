@@ -1,5 +1,6 @@
 import multiprocessing, hashlib
 import numpy as np
+import multiprocessing.connection
 
 import tetris
 
@@ -17,19 +18,14 @@ def CalReward(success, score, new_score):
     return ret
 
 class Game:
-    def __init__(self, seed: int, tpow = 1):
+    def __init__(self, seed: int):
         self.args = (0, False)
-        self.tpow = tpow
         self.obs = np.zeros(kTensorDim, dtype = np.uint8)
         self.env = tetris.Tetris(seed, *self.args)
         self.reset(False)
 
-    def set_state(self, cur, nxt, board = None):
-        if board is None: board = np.zeros((kH, kW), dtype = 'int32')
-        self.env.board = board.astype('int32')
-        self.env.cur = cur
-        self.env.nxt = nxt
-        self.env._SetInternal()
+    def set_queue(self, queue):
+        self.env.SetQueue(queue)
         self._set_obs()
 
     def _set_obs(self):
@@ -71,9 +67,11 @@ class Game:
             episode_info = None
         return self.obs, reward, over, episode_info
 
-    def reset(self, env_reset = True):
+    def reset(self, env_reset = True, queue = None):
         """ Reset environment """
-        if env_reset: self.env.Reset(*self.args)
+        if env_reset:
+            if queue is None: self.env.Reset(*self.args)
+            else: self.env.Reset(*self.args, queue)
         self.fail_cnt = 0
         self.length = 0
         self.reward = 0

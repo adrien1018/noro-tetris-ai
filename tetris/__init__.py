@@ -32,7 +32,7 @@ def GetRandPerm(rand):
     return ret
 
 class Tetris:
-    def __init__(self, seed = None, start = 0, rotate = True, cur = None, nxt = None):
+    def __init__(self, seed = None, start = 0, rotate = True):
         self.random = random.Random()
         if seed is not None: self.Seed(seed)
         self.Reset(start, rotate)
@@ -41,10 +41,11 @@ class Tetris:
         if len(self.queue) < 7: self.queue.extend(GetRandPerm(self.random))
         return self.queue.popleft()
 
-    def Reset(self, start = 0, rotate = True, cur = None, nxt = None):
+    def Reset(self, start = 0, rotate = True, queue = None):
         self.board = np.zeros((kH, kW), dtype = 'int32')
         self.steps = 0
         self.queue = deque() #
+        if queue is not None: self.queue.extend(queue)
         self.cur = self._QueueStep() #
         self.hold = None
         self.holded = False
@@ -55,6 +56,11 @@ class Tetris:
         self.rotate = rotate
         self._SetInternal()
         self.over = False
+
+    def SetQueue(self, queue):
+        self.queue.clear()
+        self.queue.extend(queue)
+        self._SetInternal()
 
     def Hold(self):
         if self.holded: return False, None, None

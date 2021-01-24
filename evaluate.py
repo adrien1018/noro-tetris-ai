@@ -8,7 +8,7 @@ from config import Configs
 from collections import Counter
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-kEnvs = 1000
+kEnvs = 10000
 
 if __name__ == "__main__":
     try:
@@ -45,4 +45,8 @@ if __name__ == "__main__":
                 finished[i] = True
     score = sorted(list(dict(Counter(score)).items()))
     for i, j in score: print(i, j)
-    #score = [(i, j) for j, i in enumerate(score)]
+    #score.sort()
+    #print('Average: {}'.format(sum(score) / len(score)))
+    #lst = [0, 0.01, 0.04, 0.1, 0.3, 0.5, 0.7, 0.9, 0.96, 0.99, 1]
+    #print(''.join(['%6.2f' % i for i in lst]))
+    #print(''.join(['%6d' % score[int(i * (len(score) - 1))] for i in lst]))
